@@ -4617,7 +4617,7 @@ async function publishUpload(){
     owner:me.user,
     cover:rnd(['🎵','🎧','🎹','🔥','🌙','⚡']),
     coverMid:upCoverMid||null,
-    origin:'local',mid,ib,priv,plays:0,dur:0,liked:false};
+    origin:'local',mid,ib,priv,plays:0,dur:0,liked:false,up:true};
   const all=tracksAll();all.unshift(trk);tracksSave(all);
   addLog('music',me.user,'загрузил трек «'+trk.name+'»'+(priv?' (приватно)':''));
   addOon(25);bumpUpload();
@@ -4633,7 +4633,8 @@ async function publishUpload(){
   upCoverMid=null;upCoverTouched=false;upCoverTask=null;upCoverSeq++;
   const ucn=document.getElementById('upCoverName');if(ucn)ucn.textContent='без обложки';
   closeUpload();
-  toast(priv?'трек сохранён — приватный, только в «моих треках»':'трек в oomy music, чарте и витрине!');
+  toast(priv?'трек сохранён — приватный, в «моих треках» и «загруженном»':'трек в «загруженном», чарте и витрине!');
+  soundTab='upl';
   if(!document.getElementById('pg-sound').classList.contains('hidden'))renderSound();
   playQueueFrom(trk.id);
 }
@@ -4680,6 +4681,9 @@ function renderSound(){
   const pl=load(LS.playlists,[]);
   const pub=trs.filter(t=>t.origin==='local'&&!t.priv);
   const my=trs.filter(t=>isMyTrack(t));
+  const myUpl=my.filter(t=>isUploadedTrack(t));
+  const myPl=pl.filter(p=>p.owner===me.user||(p.members||[]).includes(me.user));
+  const pubPl=pl.filter(p=>!p.priv);
   const artists=new Set(my.map(t=>t.artist||'—')).size;
   const totalPlays=my.reduce((a,t)=>a+(t.plays||0),0);
   box.innerHTML=`
@@ -4689,7 +4693,6 @@ function renderSound(){
         <div class="snd-sub">музыка толстых котиков · ${my.length} треков · ${artists} исполнителей · ${totalPlays} прослушиваний</div>
         <div class="snd-actions">
           <button class="snd-playall" id="sndPlayAll">▶ слушать ${soundTab==='fav'?'избранное':soundTab==='chart'?'чарт':soundTab==='shop'?'витрину':'всё подряд'}</button>
-          <button class="minibtn" id="trkOpen" style="background:var(--card2)">⬆ загрузить трек</button>
           <button class="minibtn" id="waveBtn" style="background:var(--card2)">🎲 волна</button>
         </div>
       </div>
@@ -4697,15 +4700,17 @@ function renderSound(){
     <div class="pcard" style="padding:0 0 10px">
       <div class="subtabs">
         <button class="stab ${soundTab==='my'?'active':''}" data-st="my">мои треки · ${my.length}</button>
+        <button class="stab ${soundTab==='upl'?'active':''}" data-st="upl">⬆ загруженное · ${myUpl.length}</button>
         <button class="stab ${soundTab==='chart'?'active':''}" data-st="chart">чарт · ${pub.length}</button>
         <button class="stab ${soundTab==='shop'?'active':''}" data-st="shop">витрина · ${pub.length}</button>
-        <button class="stab ${soundTab==='pl'?'active':''}" data-st="pl">плейлисты · ${pl.length}</button>
+        <button class="stab ${soundTab==='plall'?'active':''}" data-st="plall">плейлисты для всех · ${pubPl.length}</button>
+        <button class="stab ${soundTab==='pl'?'active':''}" data-st="pl">плейлисты · ${myPl.length}</button>
         <button class="stab ${soundTab==='fav'?'active':''}" data-st="fav">избранное · ${trs.filter(t=>t.liked).length}</button>
         <button class="stab ${soundTab==='sc'?'active':''}" data-st="sc">SoundCloud</button>
         <button class="stab ${soundTab==='sp'?'active':''}" data-st="sp">Spotify</button>
         <button class="stab ${soundTab==='ym'?'active':''}" data-st="ym">Яндекс Музыка</button>
       </div>
-      ${['sc','sp','ym','plview'].includes(soundTab)?'':`<div class="snd-search">
+      ${['sc','sp','ym','plview','pl','plall'].includes(soundTab)?'':`<div class="snd-search">
         <input id="sndQ" placeholder="поиск по названию или исполнителю…" value="${esc(soundQuery)}">
         <select id="sndSort" title="сортировка">
           <option value="new"${soundSort==='new'?' selected':''}>сначала новые</option>
@@ -4717,7 +4722,6 @@ function renderSound(){
       <div id="sndBody"></div>
     </div>`;
   box.querySelectorAll('.stab').forEach(b=>b.onclick=()=>{soundTab=b.dataset.st;renderSound();});
-  box.querySelector('#trkOpen').onclick=()=>openUpload();
   box.querySelector('#waveBtn').onclick=()=>{
     if(!pub.length){toast('на витрине пока пусто — загрузи первый трек');return;}
     const t=rnd(pub);
@@ -4729,7 +4733,15 @@ function renderSound(){
   let playList=[];
   if(soundTab==='my'){
     playList=soundFiltered(my);
-    bodyEl.innerHTML=playList.length?playList.map(t=>trackHTML(t)).join(''):`<div class="snd-empty">${my.length?'ничего не нашлось — измени запрос':'пусто… жми «загрузить трек» и стань легендой oomy music'}</div>`;
+    bodyEl.innerHTML=playList.length?playList.map(t=>trackHTML(t)).join(''):`<div class="snd-empty">${my.length?'ничего не нашлось — измени запрос':'пусто… свой трек загрузи во вкладке «⬆ загруженное», а чужой добавь через ⋯ → «добавить себе»'}</div>`;
+  }else if(soundTab==='upl'){
+    /* всё, что загрузил сам файлом — и кнопка загрузки живёт здесь */
+    playList=soundFiltered(myUpl);
+    bodyEl.innerHTML=`<div style="padding:12px 16px 4px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="dan-btn" id="uplGo">⬆ загрузить трек</button>
+      <span class="from-line">mp3 / wav / ogg — обложку возьмёт из файла, трек останется навсегда</span>
+    </div>`+(playList.length?playList.map(t=>trackHTML(t)).join(''):`<div class="snd-empty">${myUpl.length?'ничего не нашлось — измени запрос':'пока ничего не загружено — жми «⬆ загрузить трек» выше'}</div>`);
+    const ug=bodyEl.querySelector('#uplGo');if(ug)ug.onclick=()=>openUpload();
   }else if(soundTab==='chart'){
     playList=soundFiltered(pub);
     if(soundSort==='new')playList.sort((a,b)=>((b.plays||0)-(a.plays||0))||((b.likes||0)-(a.likes||0)));
@@ -4747,36 +4759,32 @@ function renderSound(){
     playList=(p.trackIds||[]).map(id=>tracksAll().find(x=>x.id===id)).filter(t=>t&&(!t.priv||canSeePrivate||isMyTrack(t)));
     bodyEl.innerHTML=playlistViewHTML(p,playList);
     bindPlaylistView(bodyEl,p,playList);
+  }else if(soundTab==='plall'){
+    /* публичные плейлисты всех котиков — как на soundcloud: зашёл, послушал, сохранил */
+    playList=[];
+    bodyEl.innerHTML=pubPl.length?pubPl.map(p=>plCardHTML(p)).join(''):'<div class="snd-empty">публичных плейлистов пока нет — создай свой во вкладке «плейлисты» и не ставь галочку «приватный», тогда он появится здесь у всех</div>';
+    bindPlCards(bodyEl);
   }else if(['sc','sp','ym'].includes(soundTab)){
     bodyEl.innerHTML=platformTabHTML(soundTab);
     bindPlatformTab(bodyEl,soundTab);
   }else{
-    bodyEl.innerHTML=pl.length?pl.map(p=>{
-      const own=p.owner===me.user;
-      return `<div class="plcard" data-pl="${p.id}">
-        <div class="tcover" style="width:54px;height:54px">${plCoverHTML(p,54)}</div>
-        <div class="tmid"><div class="tn">${esc(p.name)}</div><div class="td">${(p.trackIds||[]).length} треков · ${own?'мой плейлист':userLink(p.owner||'—')}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div></div>
-        <button class="minibtn">играть</button>
-        <button class="heartbtn">⋯</button>
-      </div>`;
-    }).join(''):'<div class="snd-empty">плейлистов пока нет — создай первый</div>';
-    bodyEl.innerHTML+=`<div style="padding:6px 16px 16px;display:flex;gap:8px;align-items:center">
-      <input class="pill-input" id="plName" style="flex:1" placeholder="создать плейлист…">
+    /* мои плейлисты (+ соавторство) и создание — форма сверху, чтобы её было видно */
+    playList=[];
+    bodyEl.innerHTML=`<div style="padding:12px 16px 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input class="pill-input" id="plName" style="flex:1;min-width:150px" placeholder="название плейлиста…">
+      <label style="display:flex;gap:5px;align-items:center;font-size:12.5px;white-space:nowrap;cursor:pointer"><input type="checkbox" id="plPriv"> приватный</label>
       <button class="minibtn" id="plCreate">＋ создать</button>
-    </div>`;
-    bodyEl.querySelectorAll('.plcard').forEach(c=>{
-      const pl0=load(LS.playlists,[]).find(x=>x.id===c.dataset.pl);
-      c.querySelector('.minibtn').onclick=e=>{e.stopPropagation();playPlaylist(pl0.id);};
-      c.querySelector('.heartbtn').onclick=e=>{e.stopPropagation();playlistMenu(e,pl0.id);};
-      c.onclick=()=>openPlaylist(pl0.id);
-    });
+    </div>`+(myPl.length?myPl.map(p=>plCardHTML(p)).join(''):'<div class="snd-empty">у тебя пока нет плейлистов — напиши название и жми «＋ создать»</div>');
+    bindPlCards(bodyEl);
     box.querySelector('#plCreate').onclick=()=>{
       const n=box.querySelector('#plName').value.trim();
       if(!n){toast('дай плейлисту имя');return;}
+      const priv=!!(box.querySelector('#plPriv')&&box.querySelector('#plPriv').checked);
       const acc=load(LS.playlists,[]);
-      acc.unshift({id:'p'+Date.now().toString(36),name:n,cover:rnd(['📼','🧨','🧀','🌕','🧁']),trackIds:[],owner:me.user,members:[]});
-      save(LS.playlists,acc);addLog('music',me.user,'создал плейлист «'+n+'»');
-      toast('плейлист готов');renderSound();
+      acc.unshift({id:'p'+Date.now().toString(36),name:n,cover:rnd(['📼','🧨','🧀','🌕','🧁']),trackIds:[],owner:me.user,members:[],priv});
+      save(LS.playlists,acc);addLog('music',me.user,'создал плейлист «'+n+'»'+(priv?' (приватный)':' (для всех)'));
+      toast(priv?'плейлист готов — приватный, только ты и соавторы':'плейлист готов — он уже в «плейлистах для всех»');
+      renderSound();
     };
     box.querySelector('#plName').onkeydown=e=>{if(e.key==='Enter')box.querySelector('#plCreate').click()};
   }
@@ -4798,6 +4806,28 @@ function plCoverHTML(p,sz){
   if(p&&p.coverMid){const u=mediaURL(p.coverMid);if(u)return '<img src="'+esc(u)+'" style="'+style+'">';}
   if(p&&p.coverUrl)return '<img src="'+esc(p.coverUrl)+'" style="'+style+'">';
   return '<span style="font-size:'+Math.round(sz*.46)+'px">'+esc((p&&p.cover)||'📼')+'</span>';
+}
+function plCardHTML(p){
+  const own=p.owner===me.user;
+  return `<div class="plcard" data-pl="${p.id}">
+    <div class="tcover" style="width:54px;height:54px">${plCoverHTML(p,54)}</div>
+    <div class="tmid"><div class="tn">${esc(p.name)}${p.priv?' <span class="tag-private">приватный</span>':' <span class="tag-public">для всех</span>'}</div><div class="td">${(p.trackIds||[]).length} треков · ${own?'мой плейлист':userLink(p.owner||'—')}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div></div>
+    <button class="minibtn">играть</button>
+    <button class="heartbtn">⋯</button>
+  </div>`;
+}
+function bindPlCards(scope){
+  scope.querySelectorAll('.plcard').forEach(c=>{
+    const pl0=load(LS.playlists,[]).find(x=>x.id===c.dataset.pl);
+    if(!pl0)return;
+    c.querySelector('.minibtn').onclick=e=>{e.stopPropagation();playPlaylist(pl0.id);};
+    c.querySelector('.heartbtn').onclick=e=>{e.stopPropagation();playlistMenu(e,pl0.id);};
+    c.onclick=()=>openPlaylist(pl0.id);
+  });
+}
+/* треки, которые я загрузил сам файлом (не копии чужих и не добавленные с платформ) */
+function isUploadedTrack(t){
+  return !!t&&isMyTrack(t)&&!t.copyOf&&!t.scSource&&!t.spSource&&!t.ymSource;
 }
 function openPlaylist(plId){
   viewPlId=plId;soundTab='plview';
@@ -4824,7 +4854,7 @@ function playlistViewHTML(p,list){
       <div class="pl-bigcover">${plCoverHTML(p,112)}</div>
       <div style="flex:1;min-width:180px">
         <div class="pf-name" style="font-size:23px">${esc(p.name)}</div>
-        <div class="pf-sub">плейлист · ${list.length} треков · создал ${userLink(owner)}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div>
+        <div class="pf-sub">плейлист · ${list.length} треков · создал ${userLink(owner)}${p.priv?' · <span class="tag-private">приватный</span>':' · <span class="tag-public">плейлист для всех</span>'}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div>
       </div>
       <div class="pl-actions">
         <button class="dan-btn" id="plvPlay">▶ играть</button>
@@ -5544,6 +5574,11 @@ function playlistMenu(e,plId){
       }}
     ]:[]),
     ...(isMine?[
+      {t:pl.priv?'🔓 сделать плейлист для всех':'🔒 сделать плейлист приватным',f:()=>{
+        pl.priv=!pl.priv;save(LS.playlists,load(LS.playlists,[]).map(x=>x.id===plId?pl:x));
+        addLog('music',me.user,(pl.priv?'сделал плейлист «'+pl.name+'» приватным':'открыл плейлист «'+pl.name+'» для всех'));
+        toast(pl.priv?'теперь плейлист видят только ты и соавторы':'теперь плейлист видят все — он в «плейлистах для всех»');renderSound();
+      }},
       {t:'переименовать',f:()=>{
         const n=prompt('новое имя:',pl.name);if(!n)return;
         pl.name=n;save(LS.playlists,load(LS.playlists,[]).map(x=>x.id===plId?pl:x));addLog('music',me.user,'переименовал плейлист');renderSound();
