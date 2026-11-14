@@ -5423,65 +5423,38 @@ async function storeAudioBlob(blob,title){
 }
 async function platGrab(kind,r){
   const cover0=r.artwork||'',metaName=r.title||'',metaArtist=r.user||'';
-  /* схема «как было»: сначала полная версия, но трек добавляется всегда.
-     пока ищем полную — параллельно качаем превью Deezer; если полная не успела,
-     превью добавляется сразу, а полная догружается в фоне и заменяет его */
+  /* только полная версия: 30-секундные превью не добавляем вообще */
   const clean=String(r.title||'').replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/\s+/g,' ').trim();
-  const prevP=(async()=>{
-    let prevUrl=r.dzPreview||'';
-    if(!prevUrl){
-      try{
-        const dz=await dzSearch((r.title+' '+(r.user||'')).trim());
-        if(dz.length&&dz[0].dzPreview)prevUrl=dz[0].dzPreview;
-      }catch(e){}
-    }
-    if(!prevUrl)return null;
+  const queries=[(r.title+' '+(r.user||'')).trim(),clean,(clean+' '+(r.user||'')).trim()];
+  const pool=[],seen={};
+  for(const q of queries){
+    if(!q||seen[q])continue;seen[q]=1;
     try{
-      const resp=await fetch(prevUrl,{cache:'no-store',signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
-      if(!resp.ok)return null;
-      const b=await resp.blob();
-      if(!b||b.size<20000)return null;
-      return new Blob([b],{type:'audio/mpeg'});
-    }catch(e){return null;}
-  })();
-  const fullP=(async()=>{
-    if(!r.dur||r.dur<=45)return null;
-    try{
-      const list=await scSearch((r.title+' '+(r.user||'')).trim());
-      const pick=bestScMatch(list,r.title,r.user,r.dur)||bestScMatch(list,clean,r.user,r.dur);
-      if(!pick)return null;
-      const g=await scGrab(pick.url);
-      if(g&&g.blob&&g.blob.size>150000){
-        const chk=await audioCheckFast(g.blob);
-        if(chk&&chk.ok&&chk.dur>=45)return {blob:g.blob,dur:chk.dur||pick.dur||r.dur,cover:cover0||(g.meta&&g.meta.thumbnail_url)||''};
-      }
+      const list=await scSearch(q);
+      (list||[]).forEach(x=>{if(x&&x.url&&!seen['u'+x.url]){seen['u'+x.url]=1;pool.push(x);}});
     }catch(e){}
-    return null;
-  })();
-  const fast=ms=>new Promise(res=>setTimeout(()=>res(null),ms));
-  let full=await Promise.race([fullP,fast(15000)]);
-  const prev=await Promise.race([prevP,fast(8000)]);
-  let pendingFull=null;
-  let blob=null,dur=0,source='preview',cover=cover0;
-  if(full){blob=full.blob;dur=full.dur;source='full';cover=full.cover||cover0;}
-  else if(prev){
-    blob=prev;dur=30;source='preview';
-    pendingFull=Promise.race([fullP,fast(90000)]); /* полная догрузится в фоне */
+    if(pool.length>=30)break;
   }
-  if(!blob){
-    full=await Promise.race([fullP,fast(10000)]);
-    if(full){blob=full.blob;dur=full.dur;source='full';cover=full.cover||cover0;}
+  if(!pool.length)throw new Error('no full');
+  const ranked=rankScMatches(pool,r.title,r.user,r.dur)
+    .concat(rankScMatches(pool,clean,r.user,r.dur))
+    .filter((x,i,a)=>a.findIndex(y=>y.url===x.url)===i)
+    .slice(0,3);
+  if(!ranked.length)throw new Error('no full');
+  /* три кандидата качаются параллельно — первый полноценный файл выигрывает */
+  const attempt=async pick=>{
+    const g=await Promise.race([scGrab(pick.url),new Promise((_,rej)=>setTimeout(()=>rej(new Error('grab timeout')),16000))]);
+    if(!g||!g.blob||g.blob.size<150000)throw new Error('empty');
+    const chk=await audioCheckFast(g.blob);
+    if(!chk||!chk.ok)throw new Error('bad audio');
+    if(chk.dur<45)throw new Error('short'); /* 30-секундный сниппет не берём */
+    return {blob:g.blob,cover:cover0||(g.meta&&g.meta.thumbnail_url)||'',dur:chk.dur||pick.dur||r.dur,source:'full',name:metaName,artist:metaArtist};
+  };
+  try{
+    return await Promise.any(ranked.map(p=>attempt(p)));
+  }catch(e){
+    throw new Error('no full');
   }
-  if(!blob){
-    const p=await Promise.race([itunesPreview(r.title,r.user),fast(8000)]);
-    if(!p)throw new Error('no audio');
-    blob=p.blob;dur=p.dur||30;source='preview';
-    if(p.cover)cover=p.cover;
-  }
-  const chk=await audioCheckFast(blob);
-  if(!chk.ok)throw new Error('bad audio');
-  if(chk.dur>0)dur=chk.dur;
-  return {blob,cover,dur,source,name:metaName,artist:metaArtist,pendingFull};
 }
 async function addFromPlatform(kind,r,el){
   const key=kind+':'+r.id;
@@ -5512,7 +5485,7 @@ async function addFromPlatform(kind,r,el){
     cover:rnd(['🎧','🎹','🔥','🌙','⚡','🟢','🟡']),
     coverUrl:g.cover||r.artwork||'',
     origin:'local',platId:key,extUrl:r.url,sourceKind:kind,
-    preview:g.source!=='full',
+    preview:false,
     liked:false,plays:0,dur:Math.round(g.dur||r.dur||0),priv:false,
     ib:stored.ib,mid:stored.mid};
   if(kind==='sc'){trk.scSource=true;trk.scUrl=r.url;}
@@ -5521,30 +5494,7 @@ async function addFromPlatform(kind,r,el){
   const all=tracksAll();all.unshift(trk);tracksSave(all);
   addLog('music',me.user,'добавил трек «'+trk.name+'» из '+PLAT_INFO[kind].name);
   addOon(25);bumpUpload();
-  if(g.source==='full'){
-    toast('«'+trk.name+'» добавлен в мои треки, витрину и чарт');
-  }else{
-    toast('«'+trk.name+'» добавлен — полная версия догружается в фоне');
-    /* полная версия придёт позже и сама заменит 30-секундное превью */
-    if(g.pendingFull){
-      Promise.resolve(g.pendingFull).then(async full=>{
-        if(!full||!full.blob||!full.blob.size)return;
-        try{
-          const st2=await storeAudioBlob(full.blob,trk.name);
-          if(!st2||(!st2.mid&&!st2.ib))return;
-          const list=tracksAll();const x=list.find(t=>t.id===trk.id);
-          if(!x)return;
-          x.mid=st2.mid||null;x.ib=st2.ib||null;
-          x.preview=false;
-          if(full.dur)x.dur=Math.round(full.dur);
-          tracksSave(list);
-          addLog('music',me.user,'полная версия трека «'+trk.name+'» готова');
-          toast('полная версия «'+trk.name+'» подгрузилась');
-          if(window.__PG==='sound')renderSound();
-        }catch(e){}
-      }).catch(()=>{});
-    }
-  }
+  toast('«'+trk.name+'» добавлен полной версией в мои треки, витрину и чарт');
   if(window.__PG==='sound')renderSound();
 }
 
