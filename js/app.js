@@ -4699,13 +4699,17 @@ function renderSound(){
     </div>
     <div class="pcard" style="padding:0 0 10px">
       <div class="subtabs">
+        <span class="stabgroup">моё</span>
         <button class="stab ${soundTab==='my'?'active':''}" data-st="my">мои треки · ${my.length}</button>
         <button class="stab ${soundTab==='upl'?'active':''}" data-st="upl">⬆ загруженное · ${myUpl.length}</button>
+        <button class="stab ${soundTab==='fav'?'active':''}" data-st="fav">избранное · ${trs.filter(t=>t.liked).length}</button>
+        <span class="stabgroup">плейлисты</span>
+        <button class="stab ${soundTab==='pl'?'active':''}" data-st="pl">мои · ${myPl.length}</button>
+        <button class="stab ${soundTab==='plall'?'active':''}" data-st="plall">для всех · ${pubPl.length}</button>
+        <span class="stabgroup">весь мир</span>
         <button class="stab ${soundTab==='chart'?'active':''}" data-st="chart">чарт · ${pub.length}</button>
         <button class="stab ${soundTab==='shop'?'active':''}" data-st="shop">витрина · ${pub.length}</button>
-        <button class="stab ${soundTab==='plall'?'active':''}" data-st="plall">плейлисты для всех · ${pubPl.length}</button>
-        <button class="stab ${soundTab==='pl'?'active':''}" data-st="pl">плейлисты · ${myPl.length}</button>
-        <button class="stab ${soundTab==='fav'?'active':''}" data-st="fav">избранное · ${trs.filter(t=>t.liked).length}</button>
+        <span class="stabgroup">найти и добавить</span>
         <button class="stab ${soundTab==='sc'?'active':''}" data-st="sc">SoundCloud</button>
         <button class="stab ${soundTab==='sp'?'active':''}" data-st="sp">Spotify</button>
         <button class="stab ${soundTab==='ym'?'active':''}" data-st="ym">Яндекс Музыка</button>
@@ -4807,11 +4811,14 @@ function plCoverHTML(p,sz){
   if(p&&p.coverUrl)return '<img src="'+esc(p.coverUrl)+'" style="'+style+'">';
   return '<span style="font-size:'+Math.round(sz*.46)+'px">'+esc((p&&p.cover)||'📼')+'</span>';
 }
+/* плашки плейлистов: инлайн-стили, чтобы выглядели одинаково в любой теме и при старом кэше css */
+const PL_TAG_PRIV='<span style="display:inline-block;font-size:10px;line-height:1.5;padding:1px 7px;border-radius:9px;background:rgba(255,255,255,.08);border:1px solid #666;color:#aaa;vertical-align:1px;margin-left:4px">🔒 приватный</span>';
+const PL_TAG_PUB='<span style="display:inline-block;font-size:10px;line-height:1.5;padding:1px 7px;border-radius:9px;background:rgba(90,220,140,.18);border:1px solid #4cd07d;color:#6ee29a;vertical-align:1px;margin-left:4px">для всех</span>';
 function plCardHTML(p){
   const own=p.owner===me.user;
   return `<div class="plcard" data-pl="${p.id}">
     <div class="tcover" style="width:54px;height:54px">${plCoverHTML(p,54)}</div>
-    <div class="tmid"><div class="tn">${esc(p.name)}${p.priv?' <span class="tag-private">приватный</span>':' <span class="tag-public">для всех</span>'}</div><div class="td">${(p.trackIds||[]).length} треков · ${own?'мой плейлист':userLink(p.owner||'—')}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div></div>
+    <div class="tmid"><div class="tn">${esc(p.name)}${p.priv?PL_TAG_PRIV:PL_TAG_PUB}</div><div class="td">${(p.trackIds||[]).length} треков · ${own?'мой плейлист':userLink(p.owner||'—')}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div></div>
     <button class="minibtn">играть</button>
     <button class="heartbtn">⋯</button>
   </div>`;
@@ -4854,7 +4861,7 @@ function playlistViewHTML(p,list){
       <div class="pl-bigcover">${plCoverHTML(p,112)}</div>
       <div style="flex:1;min-width:180px">
         <div class="pf-name" style="font-size:23px">${esc(p.name)}</div>
-        <div class="pf-sub">плейлист · ${list.length} треков · создал ${userLink(owner)}${p.priv?' · <span class="tag-private">приватный</span>':' · <span class="tag-public">плейлист для всех</span>'}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div>
+        <div class="pf-sub">плейлист · ${list.length} треков · создал ${userLink(owner)}${p.priv?' · '+PL_TAG_PRIV:' · '+PL_TAG_PUB}${(p.members||[]).length?' · соавторы: '+p.members.map(m=>userLink(m)).join(', '):''}${p.savedFrom?' · сохранён от '+userLink(p.savedFrom):''}</div>
       </div>
       <div class="pl-actions">
         <button class="dan-btn" id="plvPlay">▶ играть</button>
@@ -5120,10 +5127,54 @@ async function ymSearch(q){
     };
   }).filter(r=>r.title&&r.id);
 }
+/* ---------- Deezer: поиск без CORS-прокси (JSONP) ----------
+   прокси (corsfix/workers.dev и т.п.) из России часто недоступны — из-за этого
+   поиск в SoundCloud и Яндексе переставал работать. Deezer отдаёт JSONP и не
+   требует прокси, поэтому он страхует все три вкладки. */
+function dzJsonp(path,ms){
+  return new Promise((res,rej)=>{
+    const cb='oomydz'+Date.now().toString(36)+Math.floor(Math.random()*9999);
+    const s=document.createElement('script');
+    let done=false,t=0;
+    const fin=(ok,val)=>{
+      if(done)return;done=true;
+      try{delete window[cb]}catch(e){}
+      try{s.remove()}catch(e){}
+      clearTimeout(t);
+      ok?res(val):rej(val);
+    };
+    window[cb]=d=>fin(true,d);
+    s.onerror=()=>fin(false,new Error('deezer недоступен'));
+    s.src='https://api.deezer.com/'+path+(path.indexOf('?')<0?'?':'&')+'output=jsonp&callback='+cb;
+    document.head.appendChild(s);
+    t=setTimeout(()=>fin(false,new Error('deezer timeout')),ms||12000);
+  });
+}
+async function dzSearch(q){
+  q=(q||'').trim();if(!q)return [];
+  const j=await dzJsonp('search?q='+encodeURIComponent(q)+'&limit=24');
+  const list=(j&&Array.isArray(j.data))?j.data:[];
+  return list.map(t=>({
+    id:'dz'+(t.id||''),
+    title:t.title||'',
+    user:(t.artist&&t.artist.name)||'',
+    artwork:(t.album&&(t.album.cover_medium||t.album.cover))||'',
+    dur:Math.round(t.duration||0),
+    url:t.link||'',
+    dzPreview:t.preview||''
+  })).filter(r=>r.title&&r.id!=='dz');
+}
 async function platSearch(kind,q){
-  if(kind==='sc')return await scSearch(q);
-  if(kind==='sp')return await spSearch(q);
-  return await ymSearch(q);
+  /* сначала родной поиск платформы; если его прокси недоступны — Deezer (живой всегда) */
+  try{
+    let list=null;
+    if(kind==='sc')list=await scSearch(q);
+    else if(kind==='sp')list=await spSearch(q);
+    else list=await ymSearch(q);
+    if(list&&list.length)return list;
+  }catch(e){}
+  const list=await dzSearch(q);
+  return list.map(x=>Object.assign(x,{fallbackFor:kind}));
 }
 function platRowHTML(kind,r,i){
   const key=kind+':'+r.id;
@@ -5166,7 +5217,7 @@ function bindPlatformTab(box,kind){
         if(el.classList.contains('added')){toast('этот трек уже есть на сайте');return;}
         el.classList.add('busy');
         const ad=el.querySelector('.sc-add');if(ad)ad.textContent='добавляю…';
-        if(kind==='sc'){
+        if(kind==='sc'&&!r.dzPreview){
           addFromSoundCloud(r.url,{keepTab:true,title:r.title,artist:r.user,cover:r.artwork,dur:r.dur});
         }else{
           addFromPlatform(kind,r,el);
@@ -5295,31 +5346,42 @@ async function storeAudioBlob(blob,title){
 }
 async function platGrab(kind,r){
   let blob=null,cover=r.artwork||'',source='preview',dur=0,metaName=r.title||'',metaArtist=r.user||'';
-  /* сначала пробуем найти полную версию на SoundCloud (по названию и длительности) */
-  if(r.dur&&r.dur>45){
+  /* превью Deezer качается сразу и без прокси — трек добавится в любом случае */
+  const prevP=(async()=>{
+    if(!r.dzPreview)return null;
+    try{
+      const resp=await fetch(r.dzPreview,{cache:'no-store',signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
+      if(!resp.ok)return null;
+      const b=await resp.blob();
+      if(!b||b.size<20000)return null;
+      return new Blob([b],{type:'audio/mpeg'});
+    }catch(e){return null;}
+  })();
+  /* параллельно ищем полную версию на SoundCloud — если успеет, берём её */
+  const fullP=(async()=>{
+    if(!r.dur||r.dur<=45)return null;
     try{
       const list=await scSearch((r.title+' '+(r.user||'')).trim());
       const pick=bestScMatch(list,r.title,r.user,r.dur);
-      if(pick){
-        const g=await scGrab(pick.url);
-        if(g&&g.blob&&g.blob.size>150000){
-          blob=g.blob;dur=pick.dur||r.dur;source='full';
-          if(!cover&&g.meta&&g.meta.thumbnail_url)cover=g.meta.thumbnail_url;
-        }
-      }
+      if(!pick)return null;
+      const g=await scGrab(pick.url);
+      if(g&&g.blob&&g.blob.size>150000)return {blob:g.blob,dur:pick.dur||r.dur,cover:(!cover&&g.meta&&g.meta.thumbnail_url)?g.meta.thumbnail_url:''};
     }catch(e){}
-  }
-  /* если полной версии нет или файл не декодируется — 30-секундное превью из iTunes */
-  let chk=blob?await audioCheck(blob):null;
-  if(blob&&chk&&!chk.ok){blob=null;chk=null;}
+    return null;
+  })();
+  const full=await Promise.race([fullP,new Promise(res=>setTimeout(()=>res(null),15000))]);
+  const prev=await prevP;
+  if(full){blob=full.blob;dur=full.dur;source='full';if(full.cover&&!cover)cover=full.cover;}
+  else if(prev){blob=prev;dur=30;source='preview';}
+  /* последний шанс — 30 секунд из iTunes */
   if(!blob){
     const p=await itunesPreview(r.title,r.user);
     if(!p)throw new Error('no audio');
     blob=p.blob;dur=p.dur||30;source='preview';
     if(p.cover&&!cover)cover=p.cover;
-    chk=await audioCheck(blob);
-    if(!chk.ok)throw new Error('bad audio');
   }
+  const chk=await audioCheck(blob);
+  if(!chk.ok)throw new Error('bad audio');
   /* проверяем реальную длину: SoundCloud иногда отдаёт 30-секундный превью вместо полной версии */
   if(chk&&chk.dur>0){
     dur=chk.dur;
@@ -5334,11 +5396,11 @@ async function addFromPlatform(kind,r,el){
     toast('этот трек уже есть на сайте');
     return;
   }
-  toast(kind==='sp'?'ищу трек в Spotify и готовлю аудио…':'ищу трек в Яндексе и готовлю аудио…');
+  toast('ищу полную версию и готовлю аудио…');
   let g;
   try{g=await platGrab(kind,r);}
   catch(e){
-    toast(kind==='sp'?'Spotify не отдал аудио этого трека — попробуй другой':'Яндекс не отдал аудио этого трека — попробуй другой');
+    toast('не удалось достать аудио этого трека — попробуй другой');
     if(el&&el.isConnected){el.classList.remove('busy');const ad=el.querySelector('.sc-add');if(ad)ad.textContent='＋ на сайт';}
     return;
   }
@@ -5561,17 +5623,7 @@ function playlistMenu(e,plId){
     ...(!isMine?[{t:'сохранить себе',f:()=>savePlaylistToSelf(plId)}]:[]),
     ...(canEdit?[
       {t:'добавить треки',f:()=>addTracksToPlaylist(e,plId)},
-      {t:'поставить обложку',f:()=>setPlaylistCover(plId)},
-      {t:'пригласить котика',f:()=>{
-        const us=Object.keys(encLoad(LS.acc,{})).filter(u=>u!==me.user&&!(pl.members||[]).includes(u));
-        if(!us.length){toast('других котиков нет');return;}
-        menuPop(e.clientX,e.clientY,us.map(u=>({t:'🐱 '+u,f:()=>{
-          pl.members=pl.members||[];pl.members.push(u);
-          save(LS.playlists,load(LS.playlists,[]).map(x=>x.id===pl.id?pl:x));
-          addLog('music',me.user,'пригласил '+u+' в плейлист «'+pl.name+'»');
-          toast(u+' теперь соавтор плейлиста');renderSound();
-        }})));
-      }}
+      {t:'поставить обложку',f:()=>setPlaylistCover(plId)}
     ]:[]),
     ...(isMine?[
       {t:pl.priv?'🔓 сделать плейлист для всех':'🔒 сделать плейлист приватным',f:()=>{
