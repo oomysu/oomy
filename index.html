@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oomy — вход</title>
 <link rel="icon" href="assets/images/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/fonts.css?v=1835000028">
-<link rel="stylesheet" href="css/style.css?v=1835000028">
+<link rel="stylesheet" href="css/fonts.css?v=1835000029">
+<link rel="stylesheet" href="css/style.css?v=1835000029">
 <!-- styles: css/style.css -->
 </head>
 <body>
@@ -30,10 +30,10 @@
           <input type="text" class="af-decoy" tabindex="-1" aria-hidden="true" autocomplete="username" name="nf-decoy-user">
           <input type="password" class="af-decoy" tabindex="-1" aria-hidden="true" autocomplete="new-password" name="nf-decoy-pass">
           <label class="label" for="li-user">юзернейм</label>
-          <input type="text" id="li-user" name="nf-login-user" placeholder="user####" spellcheck="false" maxlength="20" autocomplete="new-password" autocapitalize="off" autocorrect="off" readonly data-lpignore="true" data-1p-ignore data-form-type="other">
+          <input type="text" id="li-user" name="nf-login-user" placeholder="user####" spellcheck="false" maxlength="20" autocomplete="new-password" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore data-form-type="other">
           <label class="label label-row"><span>пароль</span><span class="link" id="forgot">забыли?</span></label>
           <div class="inrow">
-            <input type="password" id="li-pass" name="nf-login-pass" placeholder="••••••••••••" autocomplete="new-password" readonly data-lpignore="true" data-1p-ignore data-form-type="other">
+            <input type="password" id="li-pass" name="nf-login-pass" placeholder="••••••••••••" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other">
             <button type="button" class="input-btn" id="li-show">показать</button>
           </div>
           <div class="err" id="li-err"></div>
@@ -65,20 +65,20 @@
           <input type="text" class="af-decoy" tabindex="-1" aria-hidden="true" autocomplete="username" name="nf-decoy-user">
           <input type="password" class="af-decoy" tabindex="-1" aria-hidden="true" autocomplete="new-password" name="nf-decoy-pass">
           <label class="label" for="r-user">юзернейм <small>(придумай позывной — занять можно только один раз)</small></label>
-          <input type="text" id="r-user" name="nf-reg-user" placeholder="user####" spellcheck="false" maxlength="20" autocomplete="new-password" autocapitalize="off" autocorrect="off" readonly data-lpignore="true" data-1p-ignore data-form-type="other">
+          <input type="text" id="r-user" name="nf-reg-user" placeholder="user####" spellcheck="false" maxlength="20" autocomplete="new-password" autocapitalize="off" autocorrect="off" data-lpignore="true" data-1p-ignore data-form-type="other">
           <div class="hint" id="r-user-hint">только английский: буквы, цифры и _ (от 3 до 20)</div>
           <label class="label" for="r-pass">пароль</label>
           <div class="inrow">
-            <input type="password" id="r-pass" name="nf-reg-pass" placeholder="придумай посложнее" autocomplete="new-password" readonly data-lpignore="true" data-1p-ignore data-form-type="other">
+            <input type="password" id="r-pass" name="nf-reg-pass" placeholder="придумай посложнее" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other">
             <button type="button" class="input-btn" id="r-show">показать</button>
           </div>
           <div class="meter" id="r-meter"><i></i><i></i><i></i><i></i><i></i></div>
           <div class="m-score" id="r-mscore"></div>
           <label class="label" for="r-pass2">повтори пароль</label>
-          <input type="password" id="r-pass2" name="nf-reg-pass2" placeholder="ещё разочек" autocomplete="new-password" readonly data-lpignore="true" data-1p-ignore data-form-type="other">
+          <input type="password" id="r-pass2" name="nf-reg-pass2" placeholder="ещё разочек" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other">
           <div class="hint" id="r-p2-hint"></div>
           <label class="label" for="r-secret">секретное слово <small>(для восстановления пароля)</small></label>
-          <input type="text" id="r-secret" name="nf-reg-secret" placeholder="например: мурзик-родился-в-2007" maxlength="40" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" readonly data-lpignore="true" data-1p-ignore data-form-type="other">
+          <input type="text" id="r-secret" name="nf-reg-secret" placeholder="например: мурзик-родился-в-2007" maxlength="40" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other">
           <div class="hint" id="r-secret-hint">если забудешь пароль — по этому слову вернём доступ. никому не говори!</div>
           <div class="captcha">
             <div class="cap-title">верификация: ты человек или очень умный кот?</div>
@@ -286,7 +286,7 @@
 </div>
 
 <!-- logic: js/app.js -->
-<script src="js/oomy-data.js?v=1835000028"></script>
-<script src="js/app.js?v=1835000028"></script>
+<script src="js/oomy-data.js?v=1835000029"></script>
+<script src="js/app.js?v=1835000029"></script>
 </body>
 </html>
