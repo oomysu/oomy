@@ -737,35 +737,37 @@ function refreshChatTicks(name){
     if(ck)ck.textContent=msgTs(m)<=seen?'✓✓':'✓';
   });
 }
-/* --- большие медиа (видео до 10МБ): байты живут в indexeddb, в облако уезжает dataURL отдельным ключом oomy.mm<id> --- */
-function cloudBigPush(){
+/* --- большие медиа: байты живут в indexeddb, в облако уезжает dataURL отдельным ключом oomy.mm<id> --- */
+function cloudBigPushOne(id,delayMs){
   const root=cloudRoot();if(!root)return;
+  const m=load(LS.media,{}),e=m[id];
+  if(!e||typeof e!=='object'||!e.idb)return;
+  const ck='oomy.mm'+id;
+  clearTimeout(cloudPushT[ck]);
+  cloudPushT[ck]=setTimeout(async()=>{
+    const root2=cloudRoot();if(!root2)return;
+    try{
+      const blob=await IDB.get(e.idb);
+      if(!blob)return;
+      const data=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(blob)});
+      /* треки до ~25МБ уезжают в облако целиком: 34e6 символов base64 ≈ 25МБ файла */
+      if(!data||data.length>34e6){cloudErr='файл '+id+' слишком большой даже для облака';return;}
+      const stamp=Date.now();
+      const versBody={};versBody[rtN(ck)]=stamp;
+      cloudKnownSet(ck,stamp);
+      /* точечный PUT к листу: корневой PATCH у части сетей блокируется.
+         штампы медиа пишем в отдельный лёгкий узел — общую карту версий не раздуваем */
+      const rs=await Promise.all([
+        cloudFetch(root2.slice(0,-5)+rtN(ck)+'.json',{method:'PUT',body:JSON.stringify(data)}),
+        cloudFetch(root2.slice(0,-5)+CMMVER+'.json',{method:'PATCH',body:JSON.stringify(versBody)})
+      ]);
+      if(rs.every(r=>r.ok)){cloudOK=true;cloudErr='';cloudLast=Date.now();try{cloudChip()}catch(e2){}}
+    }catch(e){}
+  },delayMs==null?1500:delayMs);
+}
+function cloudBigPush(){
   const m=load(LS.media,{});
-  Object.keys(m).forEach(id=>{
-    const e=m[id];
-    if(!e||typeof e!=='object'||!e.idb)return;
-    const ck='oomy.mm'+id;
-    clearTimeout(cloudPushT[ck]);
-    cloudPushT[ck]=setTimeout(async()=>{
-      const root2=cloudRoot();if(!root2)return;
-      try{
-        const blob=await IDB.get(e.idb);
-        if(!blob)return;
-        const data=await new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.readAsDataURL(blob)});
-        if(!data||data.length>15.5e6){cloudErr='файл '+id+' слишком большой даже для облака';return;}
-        const stamp=Date.now();
-        const versBody={};versBody[rtN(ck)]=stamp;
-        cloudKnownSet(ck,stamp);
-        /* точечный PUT к листу: корневой PATCH у части сетей блокируется.
-           штампы медиа пишем в отдельный лёгкий узел — общую карту версий не раздуваем */
-        const rs=await Promise.all([
-          cloudFetch(root2.slice(0,-5)+rtN(ck)+'.json',{method:'PUT',body:JSON.stringify(data)}),
-          cloudFetch(root2.slice(0,-5)+CMMVER+'.json',{method:'PATCH',body:JSON.stringify(versBody)})
-        ]);
-        if(rs.every(r=>r.ok)){cloudOK=true;cloudErr='';cloudLast=Date.now();try{cloudChip()}catch(e2){}}
-      }catch(e){}
-    },1500);
-  });
+  Object.keys(m).forEach(id=>cloudBigPushOne(id));
 }
 async function cloudBigPull(keys){
   if(!keys||!keys.length)return;
@@ -1271,7 +1273,20 @@ function putMedia(fileOrData,cb){
       const id='m'+Date.now().toString(36)+Math.floor(Math.random()*999);
       const ft=String(fileOrData.type||'');
       m[id]={idb:key,kind:ft.indexOf('video')===0?'vid':(ft.indexOf('audio')===0?'aud':'img')};
-      try{localStorage.setItem(LS.media,JSON.stringify(m))}catch(e){toast('не хватает места в браузере');return}
+      try{localStorage.setItem(LS.media,JSON.stringify(m))}
+      catch(e){
+        /* localStorage переполнен — переносим старые dataURL-медиа в indexeddb и пробуем снова.
+           если и это не помогло, отдаём null: вызывающий положит файл сразу в indexeddb */
+        try{
+          await migrateMediaToIdb(true);
+          const m2=load(LS.media,{});
+          m2[id]={idb:key,kind:ft.indexOf('video')===0?'vid':(ft.indexOf('audio')===0?'aud':'img')};
+          localStorage.setItem(LS.media,JSON.stringify(m2));
+        }catch(e2){
+          toast('файл не влез в localStorage — сохраню его в хранилище браузера');
+          fin(null);return;
+        }
+      }
       try{loadIdbMedia(id,key)}catch(e){} /* сразу готовим адрес, чтобы фото не мигало */
       try{binPut(id,fileOrData)}catch(e){}
       try{cloudPush(LS.media)}catch(e){}
@@ -1313,8 +1328,32 @@ function putMediaData(dataURL){
   try{cloudPush(LS.media)}catch(e){}
   return id;
 }
-/* адрес медиа: маленькие лежат в localStorage (мгновенно), большие качаются из indexeddb и открываются асинхронно */
-const MEMURL={},MEMLOAD={},MEDIA_WAIT={},MEMFAIL={};
+/* переезд старых localStorage-медиа в indexeddb: освобождает место и позволяет хранить большие файлы.
+   переносим понемногу, чтобы страница не подвисала */
+async function migrateMediaToIdb(all){
+  const m=load(LS.media,{});
+  const ids=Object.keys(m).filter(id=>typeof m[id]==='string'&&m[id].length>60000);
+  if(!ids.length)return 0;
+  const batch=all?ids:ids.slice(0,4);
+  let n=0;
+  for(let i=0;i<batch.length;i++){
+    const id=batch[i],v=m[id];
+    try{
+      const blob=await (await fetch(v)).blob();
+      const key='media:'+id;
+      await IDB.put(key,blob);
+      m[id]={idb:key,kind:v.indexOf('data:video')===0?'vid':(v.indexOf('data:audio')===0?'aud':'img')};
+      n++;
+      try{cloudBigPushOne(id,1200+i*1200)}catch(e){}
+    }catch(e){}
+  }
+  if(n){
+    try{localStorage.setItem(LS.media,JSON.stringify(m));}catch(e){}
+    setTimeout(()=>{try{cloudPush(LS.media)}catch(e){}},1200+n*1200);
+  }
+  return n;
+}
+/* адрес медиа: маленькие лежат в localStorage (мгновенно), большие качаются из indexeddb и открываются асинхронно */const MEMURL={},MEMLOAD={},MEDIA_WAIT={},MEMFAIL={};
 function mediaURL(id){
   if(!id)return null;
   if(MEMURL[id])return MEMURL[id];
@@ -4548,7 +4587,7 @@ function openUpload(){
   const bg=document.getElementById('upBg');
   bg.classList.add('open');
   const f=document.getElementById('upFile'),p=document.getElementById('upPick');
-  p.textContent='нажми, чтобы выбрать mp3 / wav / ogg';
+  p.textContent='нажми, чтобы выбрать mp3 / wav / ogg · до 40МБ';
   p.onclick=()=>f.click();
   f.onchange=()=>{
     const file=f.files&&f.files[0];
@@ -4594,6 +4633,7 @@ async function publishUpload(){
   const artist=document.getElementById('upArtist').value.trim();
   const priv=document.getElementById('upPrivate').checked;
   if(!f){toast('сначала выбери аудиофайл');return;}
+  if(f.size>40*1024*1024){toast('файл больше 40МБ — для сайта хватит и 15МБ (128 kbps)');return;}
   if(!upCoverTouched&&!upCoverMid&&upCoverTask){try{await upCoverTask;}catch(e){}}
   toast('сохраняю трек навсегда…');
   let mid=null,ib=null;
@@ -4657,9 +4697,8 @@ let soundTab='my',soundQuery='',soundSort='new',viewPlId=null;
 /* поиск SoundCloud прямо в oomy music */
 /* живые вкладки платформ: результаты не кешируем — каждый запрос идёт в сеть */
 const PLAT_INFO={
-  sc:{name:'SoundCloud',icon:'☁️',ph:'название трека или исполнитель…',hint:'нажми на трек — oomy скачает полную версию и добавит в мои треки, витрину и чарт'},
-  sp:{name:'Spotify',icon:'🟢',ph:'что ищем в Spotify…',hint:'нажми на трек — oomy найдёт полную версию или 30-секундное превью и добавит его на сайт'},
-  ym:{name:'Яндекс Музыка',icon:'🟡',ph:'что ищем в Яндексе…',hint:'нажми на трек — oomy найдёт полную версию или 30-секундное превью и добавит его на сайт'}
+  sc:{name:'SoundCloud',icon:'☁️',ph:'название трека или исполнитель…',hint:'нажми на трек — oomy скачает полную версию и добавит её в мои треки, витрину и чарт'},
+  sp:{name:'Spotify',icon:'🟢',ph:'что ищем в Spotify…',hint:'нажми на трек — oomy найдёт и скачает полную версию и добавит её на сайт'}
 };
 const PLAT={
   sc:{found:[],q:'',busy:false,err:''},
@@ -4712,9 +4751,8 @@ function renderSound(){
         <span class="stabgroup">найти и добавить</span>
         <button class="stab ${soundTab==='sc'?'active':''}" data-st="sc">SoundCloud</button>
         <button class="stab ${soundTab==='sp'?'active':''}" data-st="sp">Spotify</button>
-        <button class="stab ${soundTab==='ym'?'active':''}" data-st="ym">Яндекс Музыка</button>
       </div>
-      ${['sc','sp','ym','plview','pl','plall'].includes(soundTab)?'':`<div class="snd-search">
+      ${['sc','sp','plview','pl','plall'].includes(soundTab)?'':`<div class="snd-search">
         <input id="sndQ" placeholder="поиск по названию или исполнителю…" value="${esc(soundQuery)}">
         <select id="sndSort" title="сортировка">
           <option value="new"${soundSort==='new'?' selected':''}>сначала новые</option>
@@ -4768,7 +4806,7 @@ function renderSound(){
     playList=[];
     bodyEl.innerHTML=pubPl.length?pubPl.map(p=>plCardHTML(p)).join(''):'<div class="snd-empty">публичных плейлистов пока нет — создай свой во вкладке «плейлисты» и не ставь галочку «приватный», тогда он появится здесь у всех</div>';
     bindPlCards(bodyEl);
-  }else if(['sc','sp','ym'].includes(soundTab)){
+  }else if(['sc','sp'].includes(soundTab)){
     bodyEl.innerHTML=platformTabHTML(soundTab);
     bindPlatformTab(bodyEl,soundTab);
   }else{
@@ -4987,17 +5025,19 @@ const SC_PROXIES=[
   u=>'https://cors.redoc.ly/'+u,
   u=>'https://api.cors.lol/?url='+encodeURIComponent(u)
 ];
-async function tryAll(url,as){
-  let err;
-  for(const p of SC_PROXIES){
-    try{const r=await fetch(p(url),{signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
-      if(!r.ok)continue;
-      if(as==='json'){const j=await r.json();return j}
-      if(as==='text'){const t=await r.text();return t}
+async function tryAll(url,as,ms){
+  /* все прокси параллельно: мёртвый не задерживает остальные */
+  const tasks=SC_PROXIES.map(async p=>{
+    const ac=new AbortController();const t=setTimeout(()=>ac.abort(),ms||8000);
+    try{
+      const r=await fetch(p(url),{signal:ac.signal,cache:'no-store'});
+      if(!r.ok)throw new Error('http '+r.status);
+      if(as==='json')return await r.json();
+      if(as==='text')return await r.text();
       return r;
-    }catch(e){err=e}
-  }
-  throw err||new Error('все пути блок');
+    }finally{clearTimeout(t);}
+  });
+  return await Promise.any(tasks);
 }
 /* путь №1: cobalt — публичный загрузчик медиа (тот же движок, чем пользуются сайты-качалки) */
 /* --- поиск в SoundCloud: находим client_id и дергаем публичный api-v2 --- */
@@ -5164,17 +5204,26 @@ async function dzSearch(q){
     dzPreview:t.preview||''
   })).filter(r=>r.title&&r.id!=='dz');
 }
+function platTimeout(p,ms,def){return Promise.race([p,new Promise(res=>setTimeout(()=>res(def),ms))]);}
 async function platSearch(kind,q){
-  /* сначала родной поиск платформы; если его прокси недоступны — Deezer (живой всегда) */
-  try{
-    let list=null;
-    if(kind==='sc')list=await scSearch(q);
-    else if(kind==='sp')list=await spSearch(q);
-    else list=await ymSearch(q);
-    if(list&&list.length)return list;
-  }catch(e){}
-  const list=await dzSearch(q);
-  return list.map(x=>Object.assign(x,{fallbackFor:kind}));
+  /* родной поиск и Deezer идут ОДНОВРЕМЕННО: мёртвые прокси больше не задерживают выдачу.
+     родному поиску даём фору 2.2с (там полные треки), иначе сразу показываем Deezer (ответ ~0.5с). */
+  const natP=(async()=>{
+    try{
+      let list=null;
+      if(kind==='sc')list=await scSearch(q);
+      else if(kind==='sp')list=await spSearch(q);
+      else list=await ymSearch(q);
+      return Array.isArray(list)?list:[];
+    }catch(e){return [];}
+  })();
+  const dzP=dzSearch(q).then(l=>l.map(x=>Object.assign(x,{fallbackFor:kind}))).catch(()=>[]);
+  const nat=await platTimeout(natP,2200,null);
+  if(nat&&nat.length)return nat;
+  const dz=await dzP;
+  if(dz.length)return dz;
+  const nat2=await platTimeout(natP,6000,null);
+  return nat2||[];
 }
 function platRowHTML(kind,r,i){
   const key=kind+':'+r.id;
@@ -5258,28 +5307,40 @@ function bindPlatformTab(box,kind){
 function platNorm(s){
   return String(s||'').toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/[^a-z0-9а-яё]+/gi,' ').trim();
 }
-function bestScMatch(list,title,artist,targetDur){
+function scScore(x,title,artist,targetDur){
   const nt=platNorm(title),na=platNorm(artist);
-  let best=null,bs=0;
+  const ct=platNorm(x.title),cu=platNorm(x.user);
+  let s=0;
+  if(ct===nt)s+=4;
+  else if(nt&&(ct.includes(nt)||nt.includes(ct)))s+=2.5;
+  else{
+    const toks=nt.split(' ').filter(w=>w.length>2);
+    const hit=toks.filter(w=>ct.includes(w)).length;
+    if(hit)s+=Math.min(2.4,hit*0.8);
+  }
+  if(na&&cu&&(cu.includes(na)||na.includes(cu)||cu.split(' ').some(w=>w.length>2&&na.includes(w))))s+=2;
+  /* ремиксы/каверы не должны перебивать оригинал, если человек искал оригинал */
+  const bad=/(remix|remake|cover|nightcore|slowed|reverb|8d|instrumental|karaoke|sped\s*up|mashup)/i;
+  if(bad.test(String(x.title||''))&&!bad.test(String(title||'')))s-=5;
+  const dd=Math.abs((x.dur||0)-(targetDur||0));
+  if(targetDur){if(dd<=6)s+=2;else if(dd<=15)s+=1;else if(dd>35)s-=4;}
+  return s;
+}
+function rankScMatches(list,title,artist,targetDur){
+  const out=[];
   for(const x of (list||[])){
     if(!x||!x.url||x.streamable===false)continue;
-    const ct=platNorm(x.title),cu=platNorm(x.user);
-    let s=0;
-    if(ct===nt)s+=4;
-    else if(nt&&(ct.includes(nt)||nt.includes(ct)))s+=2.5;
-    else{
-      const toks=nt.split(' ').filter(w=>w.length>2);
-      const hit=toks.filter(w=>ct.includes(w)).length;
-      if(hit)s+=Math.min(2.4,hit*0.8);
-    }
-    if(na&&cu&&(cu.includes(na)||na.includes(cu)||cu.split(' ').some(w=>w.length>2&&na.includes(w))))s+=2;
-    const dd=Math.abs((x.dur||0)-(targetDur||0));
-    if(targetDur){if(dd<=6)s+=2;else if(dd<=15)s+=1;else if(dd>35)s-=4;}
-    if(s>bs){bs=s;best=x;}
+    const s=scScore(x,title,artist,targetDur);
+    if(s<2.5)continue;
+    if(targetDur&&Math.abs((x.dur||0)-targetDur)>40)continue;
+    out.push({x,s});
   }
-  if(!best||bs<4)return null;
-  if(targetDur&&Math.abs((best.dur||0)-targetDur)>25)return null;
-  return best;
+  out.sort((a,b)=>b.s-a.s);
+  return out.map(o=>o.x);
+}
+function bestScMatch(list,title,artist,targetDur){
+  const r=rankScMatches(list,title,artist,targetDur);
+  return r[0]||null;
 }
 async function itunesPreview(title,artist){
   const term=(title+' '+artist).trim();
@@ -5325,12 +5386,28 @@ async function audioCheck(blob){
     a.src=u;
   });
 }
+async function audioCheckFast(blob){
+  return await new Promise(res=>{
+    let done=false;
+    const a=document.createElement('audio');
+    const u=URL.createObjectURL(blob);
+    let dur=0;
+    const finish=ok=>{if(done)return;done=true;try{URL.revokeObjectURL(u)}catch(e){};try{a.removeAttribute('src')}catch(e){};res({ok,dur:Math.round((dur||a.duration||0)*10)/10})};
+    a.preload='auto';
+    a.onloadedmetadata=()=>{dur=a.duration||0};
+    a.oncanplay=()=>finish(true);
+    a.onerror=()=>finish(false);
+    setTimeout(()=>finish(!a.error&&a.readyState>=2),3500);
+    a.src=u;
+  });
+}
 async function storeAudioBlob(blob,title){
   let ib=null,mid=null;
   try{
     const ext=/mp4|m4a|aac/i.test(blob.type||'')?'m4a':'mp3';
     const file=new File([blob],((title||'track')+'.'+ext).slice(0,80),{type:blob.type||'audio/mpeg'});
-    mid=await new Promise(res=>putMedia(file,id=>res(id||null)));
+    /* если хранилище переполнено, putMedia может не ответить — ждём максимум 8с и уходим в indexeddb */
+    mid=await Promise.race([new Promise(res=>putMedia(file,id=>res(id||null))),new Promise(res=>setTimeout(()=>res(null),8000))]);
     if(mid){const rec=(load(LS.media,{})||{})[mid];if(rec&&typeof rec==='object'&&rec.idb)ib=rec.idb;}
   }catch(e){}
   if(!mid){
@@ -5345,49 +5422,66 @@ async function storeAudioBlob(blob,title){
   return {ib,mid};
 }
 async function platGrab(kind,r){
-  let blob=null,cover=r.artwork||'',source='preview',dur=0,metaName=r.title||'',metaArtist=r.user||'';
-  /* превью Deezer качается сразу и без прокси — трек добавится в любом случае */
+  const cover0=r.artwork||'',metaName=r.title||'',metaArtist=r.user||'';
+  /* схема «как было»: сначала полная версия, но трек добавляется всегда.
+     пока ищем полную — параллельно качаем превью Deezer; если полная не успела,
+     превью добавляется сразу, а полная догружается в фоне и заменяет его */
+  const clean=String(r.title||'').replace(/\([^)]*\)|\[[^\]]*\]/g,' ').replace(/\s+/g,' ').trim();
   const prevP=(async()=>{
-    if(!r.dzPreview)return null;
+    let prevUrl=r.dzPreview||'';
+    if(!prevUrl){
+      try{
+        const dz=await dzSearch((r.title+' '+(r.user||'')).trim());
+        if(dz.length&&dz[0].dzPreview)prevUrl=dz[0].dzPreview;
+      }catch(e){}
+    }
+    if(!prevUrl)return null;
     try{
-      const resp=await fetch(r.dzPreview,{cache:'no-store',signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
+      const resp=await fetch(prevUrl,{cache:'no-store',signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
       if(!resp.ok)return null;
       const b=await resp.blob();
       if(!b||b.size<20000)return null;
       return new Blob([b],{type:'audio/mpeg'});
     }catch(e){return null;}
   })();
-  /* параллельно ищем полную версию на SoundCloud — если успеет, берём её */
   const fullP=(async()=>{
     if(!r.dur||r.dur<=45)return null;
     try{
       const list=await scSearch((r.title+' '+(r.user||'')).trim());
-      const pick=bestScMatch(list,r.title,r.user,r.dur);
+      const pick=bestScMatch(list,r.title,r.user,r.dur)||bestScMatch(list,clean,r.user,r.dur);
       if(!pick)return null;
       const g=await scGrab(pick.url);
-      if(g&&g.blob&&g.blob.size>150000)return {blob:g.blob,dur:pick.dur||r.dur,cover:(!cover&&g.meta&&g.meta.thumbnail_url)?g.meta.thumbnail_url:''};
+      if(g&&g.blob&&g.blob.size>150000){
+        const chk=await audioCheckFast(g.blob);
+        if(chk&&chk.ok&&chk.dur>=45)return {blob:g.blob,dur:chk.dur||pick.dur||r.dur,cover:cover0||(g.meta&&g.meta.thumbnail_url)||''};
+      }
     }catch(e){}
     return null;
   })();
-  const full=await Promise.race([fullP,new Promise(res=>setTimeout(()=>res(null),15000))]);
-  const prev=await prevP;
-  if(full){blob=full.blob;dur=full.dur;source='full';if(full.cover&&!cover)cover=full.cover;}
-  else if(prev){blob=prev;dur=30;source='preview';}
-  /* последний шанс — 30 секунд из iTunes */
+  const fast=ms=>new Promise(res=>setTimeout(()=>res(null),ms));
+  let full=await Promise.race([fullP,fast(15000)]);
+  const prev=await Promise.race([prevP,fast(8000)]);
+  let pendingFull=null;
+  let blob=null,dur=0,source='preview',cover=cover0;
+  if(full){blob=full.blob;dur=full.dur;source='full';cover=full.cover||cover0;}
+  else if(prev){
+    blob=prev;dur=30;source='preview';
+    pendingFull=Promise.race([fullP,fast(90000)]); /* полная догрузится в фоне */
+  }
   if(!blob){
-    const p=await itunesPreview(r.title,r.user);
+    full=await Promise.race([fullP,fast(10000)]);
+    if(full){blob=full.blob;dur=full.dur;source='full';cover=full.cover||cover0;}
+  }
+  if(!blob){
+    const p=await Promise.race([itunesPreview(r.title,r.user),fast(8000)]);
     if(!p)throw new Error('no audio');
     blob=p.blob;dur=p.dur||30;source='preview';
-    if(p.cover&&!cover)cover=p.cover;
+    if(p.cover)cover=p.cover;
   }
-  const chk=await audioCheck(blob);
+  const chk=await audioCheckFast(blob);
   if(!chk.ok)throw new Error('bad audio');
-  /* проверяем реальную длину: SoundCloud иногда отдаёт 30-секундный превью вместо полной версии */
-  if(chk&&chk.dur>0){
-    dur=chk.dur;
-    if(source==='full'&&r.dur&&chk.dur<Math.min(90,r.dur*0.6))source='preview';
-  }
-  return {blob,cover,dur,source,name:metaName,artist:metaArtist};
+  if(chk.dur>0)dur=chk.dur;
+  return {blob,cover,dur,source,name:metaName,artist:metaArtist,pendingFull};
 }
 async function addFromPlatform(kind,r,el){
   const key=kind+':'+r.id;
@@ -5400,7 +5494,7 @@ async function addFromPlatform(kind,r,el){
   let g;
   try{g=await platGrab(kind,r);}
   catch(e){
-    toast('не удалось достать аудио этого трека — попробуй другой');
+    toast('полная версия не нашлась — попробуй другое название или залей mp3 вручную');
     if(el&&el.isConnected){el.classList.remove('busy');const ad=el.querySelector('.sc-add');if(ad)ad.textContent='＋ на сайт';}
     return;
   }
@@ -5430,7 +5524,26 @@ async function addFromPlatform(kind,r,el){
   if(g.source==='full'){
     toast('«'+trk.name+'» добавлен в мои треки, витрину и чарт');
   }else{
-    toast('«'+trk.name+'» добавлен как 30-секундное превью — полной версии не нашлось');
+    toast('«'+trk.name+'» добавлен — полная версия догружается в фоне');
+    /* полная версия придёт позже и сама заменит 30-секундное превью */
+    if(g.pendingFull){
+      Promise.resolve(g.pendingFull).then(async full=>{
+        if(!full||!full.blob||!full.blob.size)return;
+        try{
+          const st2=await storeAudioBlob(full.blob,trk.name);
+          if(!st2||(!st2.mid&&!st2.ib))return;
+          const list=tracksAll();const x=list.find(t=>t.id===trk.id);
+          if(!x)return;
+          x.mid=st2.mid||null;x.ib=st2.ib||null;
+          x.preview=false;
+          if(full.dur)x.dur=Math.round(full.dur);
+          tracksSave(list);
+          addLog('music',me.user,'полная версия трека «'+trk.name+'» готова');
+          toast('полная версия «'+trk.name+'» подгрузилась');
+          if(window.__PG==='sound')renderSound();
+        }catch(e){}
+      }).catch(()=>{});
+    }
   }
   if(window.__PG==='sound')renderSound();
 }
@@ -5447,7 +5560,8 @@ async function cobaltAudio(u){
   for(const ep of endpoints){
     try{
       const r=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
-        body:JSON.stringify({url:u,downloadMode:'audio',audioFormat:'mp3',filenameStyle:'basic',vQuality:'128'})});
+        body:JSON.stringify({url:u,downloadMode:'audio',audioFormat:'mp3',filenameStyle:'basic',vQuality:'128'}),
+        signal:AbortSignal.timeout?AbortSignal.timeout(6000):undefined});
       if(!r.ok)continue;
       const j=await r.json();
       if(j&&(j.status==='tunnel'||j.status==='redirect'||j.status==='stream'||j.status==='picker')&&j.url)return j.url;
@@ -5496,14 +5610,60 @@ async function scHlsBlob(streamUrl,ms){
   await Promise.all(Array.from({length:Math.min(6,urls.length)},()=>worker()));
   return new Blob(parts,{type:'audio/mp4'});
 }
+/* быстрый путь: api-v2 resolve → transcoding → mp3/m4a. 2-6 секунд вместо минуты */
 async function scGrab(u){
+  /* жёсткий лимит: трек не должен висеть дольше ~15 секунд */
+  const deadline=Date.now()+15000;
+  const left=()=>Math.max(1000,deadline-Date.now());
+  /* путь №1: официальный api-v2 через прокси + HLS/прогрессив */
+  try{
+    const cid=await scClientId(false);
+    if(cid){
+      let tj=null;
+      try{
+        tj=await scFetch('https://api-v2.soundcloud.com/resolve?url='+encodeURIComponent(u)+'&client_id='+encodeURIComponent(cid),'json',Math.min(8000,left()));
+      }catch(e){}
+      if(tj&&tj.media&&tj.media.transcodings&&tj.media.transcodings.length){
+        const meta={title:tj.title,thumbnail_url:tj.artwork_url||'',user:{username:(tj.user&&tj.user.username)||''}};
+        const trs=tj.media.transcodings;
+        const tryStream=async x=>{
+          try{
+            const st=await scFetch(x.url+(x.url.includes('?')?'&':'?')+'client_id='+encodeURIComponent(cid),'json',Math.min(8000,left()));
+            return st&&st.url?st.url:null;
+          }catch(e){return null;}
+        };
+        const prog=trs.find(x=>x.format&&x.format.protocol==='progressive'&&/mpeg|mp3/i.test(x.format.mime_type||''))||trs.find(x=>x.format&&x.format.protocol==='progressive');
+        if(prog){
+          const url=await tryStream(prog);
+          if(url){
+            try{
+              const r=await fetch(url,{signal:AbortSignal.timeout?AbortSignal.timeout(Math.min(20000,left())):undefined});
+              if(r.ok){const b=await r.blob();if(b&&b.size)return {meta,blob:b};}
+            }catch(e){}
+          }
+        }
+        /* 160 kbps aac: хороший звук и файл меньше mp3 320 */
+        const hls=trs.find(x=>x.preset==='aac_160k')||trs.find(x=>x.preset==='aac_96k')||trs.find(x=>x.format&&x.format.protocol==='hls');
+        if(hls){
+          const url=await tryStream(hls);
+          if(url){
+            try{const b=await scHlsBlob(url);if(b&&b.size)return {meta,blob:b};}
+            catch(e){if(String(e&&e.message)==='track too long')throw e;}
+          }
+        }
+        /* API ответил, но файла нет — быстро выходим, не ждём cobalt */
+        throw new Error('soundcloud не отдал файл');
+      }
+    }
+  }catch(e){if(String(e&&e.message)==='soundcloud не отдал файл'||String(e&&e.message)==='track too long')throw e;}
+  if(Date.now()>deadline)throw new Error('soundcloud timeout');
+  /* путь №2: страница трека — одна быстрая попытка */
   const oembed='https://soundcloud.com/oembed?format=json&url='+encodeURIComponent(u);
   let meta=null;
-  try{meta=await tryAll(oembed,'json')}catch(e){}
-  /* путь №2: забираем страницу, ищем client_id и транскодинги */
+  try{meta=await tryAll(oembed,'json',Math.min(6000,left()))}catch(e){}
   let cid=null,prog=null,trs=null;
   try{
-    const html=await tryAll(u,'text');
+    const html=await tryAll(u,'text',Math.min(6000,left()));
     cid=(html.match(/client_id["'\s:=]+([a-zA-Z0-9]{20,40})/)||[])[1];
     const tj=html.match(/"transcodings":(\[.*?\])/);
     if(tj){
@@ -5511,37 +5671,18 @@ async function scGrab(u){
       prog=trs.find(x=>x.format&&x.format.protocol==='progressive'&&/mpeg|mp3/i.test(x.format.mime_type||''))||trs.find(x=>x.format&&x.format.protocol==='progressive');
     }
   }catch(e){}
-  /* в новых страницах client_id нет — берём его тем же способом, что и для поиска */
   if(!cid)try{cid=await scClientId(false)}catch(e){}
   if(cid&&prog){
-    const stream=await tryAll(prog.url+(prog.url.includes('?')?'&':'?')+'client_id='+cid,'json');
-    if(stream.url){
-      const r=await tryAll(stream.url);
-      const blob=await r.blob();
-      if(blob&&blob.size)return {meta,blob};
-    }
+    try{
+      const stream=await tryAll(prog.url+(prog.url.includes('?')?'&':'?')+'client_id='+cid,'json',Math.min(7000,left()));
+      if(stream&&stream.url){
+        const r=await tryAll(stream.url,undefined,Math.min(12000,left()));
+        const blob=await r.blob();
+        if(blob&&blob.size)return {meta,blob};
+      }
+    }catch(e){}
   }
-  /* путь №2б: у новых треков только HLS (aac) — качаем сегменты и склеиваем в m4a */
-  if(cid&&trs&&trs.length){
-    let h=trs.find(x=>x.preset==='aac_96k')||trs.find(x=>x.preset==='aac_160k')||trs.find(x=>x.format&&x.format.protocol==='hls');
-    if(h){
-      try{
-        const stream=await scFetch(h.url+(h.url.includes('?')?'&':'?')+'client_id='+cid,'json',12000);
-        if(stream&&stream.url){
-          const blob=await scHlsBlob(stream.url);
-          if(blob&&blob.size)return {meta,blob};
-        }
-      }catch(e){if(String(e&&e.message)==='track too long')throw e;}
-    }
-  }
-  /* путь №1 (если путь №2 не сработал): cobalt отдаёт прямую ссылку на mp3 */
-  const audioUrl=await cobaltAudio(u);
-  let r;
-  try{r=await fetch(audioUrl)}catch(e){r=null}
-  if(!r||!r.ok)r=await tryAll(audioUrl);
-  const blob=await r.blob();
-  if(!blob||!blob.size)throw new Error('пустой файл');
-  return {meta,blob};
+  throw new Error('soundcloud не отдал файл');
 }
 /* SoundCloud-ссылка → mp3-файл на Сайте: качаем в IndexedDB, трек играет в нижнем плеере как залитый */
 async function addFromSoundCloud(u,opts){
@@ -7815,6 +7956,8 @@ function ensureAccounts(){
     liUser.focus();
   }
   cloudStart();
+  /* освобождаем localStorage: старые медиа переезжают в indexeddb по 4 штуки каждые 30с */
+  try{migrateMediaToIdb();setInterval(()=>{try{migrateMediaToIdb()}catch(e){}},30000);}catch(e){}
 })();
 
 /* ============ ШПИЛКИ: игры на двоих ============ */
