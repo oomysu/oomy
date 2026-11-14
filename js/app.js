@@ -44,8 +44,14 @@ const LVNODE=u=>'oomy__lv_'+uEnc(u);
 const logKeyFor=u=>LS.logs+'__'+String(u||'—');
 const isLogKey=k=>typeof k==='string'&&k.indexOf(LS.logs+'__')===0;
 const CVKEY='oomy.vers'; /* карта версий: кто что менял */
+const CMMVER='oomy__mmvers'; /* штампы медиа-файлов в отдельном лёгком узле:
+  раньше каждый файл писал штамп в общую карту версий, и каждый опрос
+  качал её целиком — на сотнях фото это были мегабайты каждые 5 секунд,
+  бесплатный лимит трафика кончался, и «общий мир отлетал» */
 const CHOW='oomy.chatsOwner'; /* кто владелец чатов в этом ключе: без него чужие сообщения не понять */
 let cloudOK=false,cloudErr='',cloudLast=0,cloudTimer=null,cloudPushT={},cloudKnown=null,cloudVisHook=false;
+/* сколько опросов подряд не удалось: для плавной паузы между попытками,
+   чтобы при сбое не долбить сервер каждую секунду и не усугублять проблему */
 function cloudKnownGet(){if(!cloudKnown){try{cloudKnown=JSON.parse(localStorage.getItem('oomy.versKnown')||'{}')||{}}catch(e){cloudKnown={}}}return cloudKnown}
 function cloudKnownSet(k,v){cloudKnownGet()[k]=v;try{localStorage.setItem('oomy.versKnown',JSON.stringify(cloudKnown))}catch(e){}}
 function cloudStatus(){return {on:cloudEnabled(),url:cloudURL(),ok:cloudOK,err:cloudErr,last:cloudLast}}
@@ -63,6 +69,7 @@ function cloudChip(){
   if(!st.on){c.textContent='';c.style.display='none';return;}
   c.style.display='';
   if(st.ok){c.textContent='☁ общий мир · связь есть';c.style.color='var(--good)';}
+  else if(cloudFails>0){c.textContent='☁ общий мир · переподключаюсь…';c.style.color='var(--muted2,var(--muted))';}
   else{c.textContent='☁ общий мир · нет связи'+(st.err?' ('+String(st.err).slice(0,40)+')':'');c.style.color='var(--bad)';}
 }
 function cloudFetch(url,opt){
@@ -125,6 +132,8 @@ function mergeCloud(k,remoteRaw){
   let out;try{out=JSON.stringify(m)}catch(e){return false}
   if(out===cur)return false;
   try{localStorage.setItem(k,out)}catch(e){return false}
+  /* пришли новые надгробия — сразу вычищаем удалённое из каталога, сумок, барахолки и музыки */
+  if(k===LS.tomb)setTimeout(()=>{try{sweepTombstones()}catch(e){}},50);
   return true;
 }
 /* «печатает…»: свой статус уезжает в личный узел облака, чужие — в память;
@@ -248,9 +257,17 @@ function cloudNoMergeKey(k){return cloudExclKey(k)||isChatKey(k)||k===CHOW||/^oo
 /* --- забрать всё с сервера (первое подключение, проверка) --- */
 async function cloudPullAll(){
   const root=cloudRoot();if(!root)return 0;
+  /* база выросла — корневой запрос отдаёт 413 (Request Entity Too Large):
+     запоминаем и больше не тратим трафик/время на гигантский запрос */
+  if(window.__rootTooBig){try{return await cloudPoll()}catch(e2){return 0}}
   try{
     const r=await cloudFetch(root);
-    if(!r.ok){cloudOK=false;cloudErr='сервер ответил '+r.status;return 0;}
+    if(!r.ok){
+      cloudOK=false;cloudErr='сервер ответил '+r.status;
+      if(r.status===413)window.__rootTooBig=true;
+      /* забираем мир по ключам, как в опросе */
+      try{return await cloudPoll()}catch(e2){return 0}
+    }
     const data=await r.json();
     cloudOK=true;cloudErr='';cloudLast=Date.now();
     if(!data||typeof data!=='object')return 0;
@@ -273,14 +290,18 @@ async function cloudPullAll(){
       });
     }
     Object.keys(data).forEach(rk=>{
-      if(rk===rtN(CVKEY)||/^oomy__chatsx_/.test(rk)||/^oomy__lv_/.test(rk)||rk.indexOf(rtN(LS.chats))===0||rk.indexOf(rtN(LS.logs))===0||/^oomy__(typing|online)_/.test(rk)||/^oomy__(games|roul|bin)(_|$)/.test(rk)||rk===rtN(LS.chats)||rk===rtN(CHOW)||rk===rtN(LS.logs))return;
+      if(rk===rtN(CVKEY)||rk===CMMVER||/^oomy__mm/.test(rk)||/^oomy__chatsx_/.test(rk)||/^oomy__lv_/.test(rk)||rk.indexOf(rtN(LS.chats))===0||rk.indexOf(rtN(LS.logs))===0||/^oomy__(typing|online)_/.test(rk)||/^oomy__(games|roul|bin)(_|$)/.test(rk)||rk===rtN(LS.chats)||rk===rtN(CHOW)||rk===rtN(LS.logs))return;
       if(mergeCloud('oomy.'+rk.slice(6),data[rk]))n++;
     });
     /* большие медиа (видео): качаем файлы в indexeddb */
-    await cloudBigPull(Object.keys(data).filter(rk=>/^oomy__mm/.test(rk)).map(rk=>'oomy.'+rk.slice(6)));
+    await cloudBigPull(Object.keys(data).filter(rk=>/^oomy__mm/.test(rk)&&rk!==CMMVER).map(rk=>'oomy.'+rk.slice(6)));
     Object.keys(vers).forEach(rk=>{cloudKnownSet('oomy.'+rk.slice(6),vers[rk]||0);});
     return n;
-  }catch(e){cloudOK=false;cloudErr=(e&&e.name==='AbortError')?'сервер не отвечает':String(e&&e.message||e);return 0;}
+  }catch(e){
+    cloudOK=false;cloudErr=(e&&e.name==='AbortError')?'сервер не отвечает':String(e&&e.message||e);
+    /* то же самое при сетевом сбое корневого запроса */
+    try{return await cloudPoll()}catch(e2){return 0}
+  }
 }
 /* первый запуск на этом устройстве: чего ещё нет в облаке — заливаем из локалки,
    чтобы подарки, музыка, посты и баланс сразу видели все аккаунты */
@@ -327,46 +348,70 @@ async function cloudPoll(){
       if(cloudExclKey(k))return;
       if(/^oomy__chatsx_/.test(rk))return; /* личные узлы чатов разбираются отдельно */
       if(/^oomy__lv_/.test(rk))return; /* личные журналы тоже разбираются отдельно */
+      if(/^oomy__mm/.test(rk))return; /* старые штампы медиа переехали в отдельный лёгкий узел */
       if(/^oomy__(typing|online)_/.test(rk))return; /* «печатает»/«онлайн» живут в памяти */
       if(/^oomy__(games|roul)(_|$)/.test(rk))return; /* шпилки и рулетка синхронизируются сами */
       if((vers[rk]||0)>(kn[k]||0))changed.push(k);
     });
+    /* медиа: штампы в лёгком узле — качаем только изменившиеся файлы */
+    let mmKeys=[];
+    try{
+      const rv=await cloudFetch(root.slice(0,-5)+CMMVER+'.json');
+      if(rv.ok){
+        const mv=await rv.json();
+        if(mv&&typeof mv==='object'){
+          Object.keys(mv).forEach(rk=>{
+            const ck='oomy.'+rk.slice(6);
+            if((mv[rk]||0)>(kn[ck]||0))mmKeys.push(ck);
+            cloudKnownSet(ck,mv[rk]||0);
+          });
+        }
+      }
+    }catch(e){}
     if(changed.includes(LS.tomb)&&!changed.includes(LS.posts))changed.push(LS.posts);
     /* чаты и логи проверяем всегда, даже если штамп «не изменился»: у друга могли быть
        сдвинуты часы — его сообщение со старым штампом больше никогда не заметили бы.
        mergeChats/mergeLogs объединяют по id, петли синхронизации нет */
     if(me&&me.user&&!me.guest&&!changed.includes(LS.chats))changed.push(LS.chats);
     if(me&&me.user&&!me.guest&&!changed.includes(LS.logs))changed.push(LS.logs);
-    if(!changed.length)return 0;
+    if(!changed.length&&!mmKeys.length)return 0;
     /* логи, чаты (личные узлы аккаунтов) и большие медиа — по своей дороге, остальное — общий путь */
     const logsIdx=changed.indexOf(LS.logs);
-    const mmKeys=changed.filter(k=>/^oomy\.mm/.test(k));
     changed.splice(0,changed.length, ...changed.filter(k=>k!==LS.chats&&k!==LS.logs&&!/^oomy\.mm/.test(k)&&k!==CHOW));
     let n=0;
     if(me&&me.user&&!me.guest){
       try{
+        /* свой узел — всегда (гарантия доставки), чужие — только открытый чат
+           и те, у кого реально сменился штамп. раньше опрашивались ВСЕ котики
+           каждый тик — на аккаунтах это были десятки запросов каждые 1.5 секунды */
         const accs=encLoad(LS.acc,{});
-        const names=[me.user].concat(Object.keys(accs).filter(u=>u!==me.user));
-        const vals=await Promise.all(names.map(u=>cloudFetch(root.slice(0,-5)+CHNODE(u)+'.json').then(r=>r.ok?r.json():null).catch(()=>null)));
+        const picks=[me.user].concat(Object.keys(accs).filter(u=>{
+          if(u===me.user)return false;
+          const rk=CHNODE(u);
+          return openChatName===u||(vers[rk]||0)>(kn[rk]||0);
+        }));
+        const vals=await Promise.all(picks.map(u=>cloudFetch(root.slice(0,-5)+CHNODE(u)+'.json').then(r=>r.ok?r.json():null).catch(()=>null)));
         /* из чужого узла берём только переписку со мной — чужие диалоги не наше дело */
         vals.forEach((v,i)=>{
+          const u=picks[i];
+          if(u!==me.user)cloudKnownSet(CHNODE(u),vers[CHNODE(u)]||Date.now());
           if(!v)return;
-          if(names[i]===me.user){if(mergeChats(v,names[i]))n++;}
+          if(u===me.user){if(mergeChats(v,u))n++;}
           else{
             const R=decEnv(v);if(!R||typeof R!=='object')return;
-            if(R[me.user]!==undefined){const one={};one[me.user]=R[me.user];if(mergeChats(one,names[i]))n++;}
+            if(R[me.user]!==undefined){const one={};one[me.user]=R[me.user];if(mergeChats(one,u))n++;}
           }
         });
       }catch(e){}
-      /* «печатает»: чужие узлы -> память (свой не читаем, чтобы не показывать себе) */
+      /* «печатает»: узел только открытого чата (живой поток чата и так слушает его сам) */
       try{
-        const accs2=encLoad(LS.acc,{});
-        Object.keys(accs2).concat(me.user).filter(u=>u!==me.user).forEach(u=>{
+        if(openChatName&&openChatName!==me.user){
+          const u=openChatName;
           cloudFetch(root.slice(0,-5)+TYPING_NODE(u)+'.json').then(r=>r.ok?r.json():null).then(v=>{
             if(v&&v[me.user])TYPING[u]=v;else delete TYPING[u];
-            try{if(openChatName===u)updateTypingUI(u);}catch(e){}
+            try{updateTypingUI(u);}catch(e){}
           }).catch(()=>{});
-        });
+        }
       }catch(e){}
     }
     if(me&&me.user&&!me.guest){
@@ -439,6 +484,46 @@ function cloudPush(k){
 function tombKind(kind){return String(kind||'').replace(/[.#$\[\]\/]/g,'_');}
 function tombKey(kind,id){return tombKind(kind)+'~'+id;}
 function tombAdd(kind,id){const t=load(LS.tomb,{});t[tombKey(kind,id)]=Date.now();save(LS.tomb,t);}
+/* надгробия сильнее всего: удалённое (админом или вручную) не возвращается ни из облака,
+   ни из снимка мира. с подарком уходит и всё связанное: копии из сумок, лоты барахолки,
+   история передач; с музыкой — сам трек. */
+function sweepTombstones(){
+  try{
+    const tb=load(LS.tomb,{})||{};
+    const dead=(kind,id)=>id!==undefined&&tb[tombKey(kind,id)]!==undefined;
+    const cat=load(LS.catalog,null);
+    if(Array.isArray(cat)){
+      const n=cat.filter(g=>!(g&&dead(LS.catalog,g.id)));
+      if(n.length!==cat.length)save(LS.catalog,n);
+    }
+    const g=load(LS.gifts,null);
+    if(g&&typeof g==='object'&&!Array.isArray(g)){
+      let ch=false;
+      Object.keys(g).forEach(u=>{
+        if(!Array.isArray(g[u]))return;
+        const keep=g[u].filter(it=>!(it&&it.gid&&dead(LS.catalog,it.gid)));
+        if(keep.length!==g[u].length){g[u]=keep;ch=true;}
+      });
+      if(ch)save(LS.gifts,g);
+    }
+    const mkt=load(LS.mkt,null);
+    if(Array.isArray(mkt)){
+      const n=mkt.filter(x=>!(x&&x.gid&&dead(LS.catalog,x.gid)));
+      if(n.length!==mkt.length)save(LS.mkt,n);
+    }
+    const chn=load(LS.giftChain,null);
+    if(chn&&typeof chn==='object'&&!Array.isArray(chn)){
+      let ch=false;
+      Object.keys(chn).forEach(gid=>{if(dead(LS.catalog,gid)){delete chn[gid];ch=true;}});
+      if(ch)save(LS.giftChain,chn);
+    }
+    const tr=load(LS.tracks,null);
+    if(Array.isArray(tr)){
+      const n=tr.filter(t=>!(t&&dead(LS.tracks,t.id)));
+      if(n.length!==tr.length)save(LS.tracks,n);
+    }
+  }catch(e){}
+}
 /* старые надгробия хранили ключ со слешем или точкой — firebase такие не принимает */
 function tombFix(){try{const t=load(LS.tomb,{});let ch=false;Object.keys(t).forEach(k=>{const nk=k.replace(/[.#$\[\]\/]/g,'_');if(nk!==k){t[nk]=t[nk]||t[k];delete t[k];ch=true;}});if(ch)save(LS.tomb,t);}catch(e){}}
 /* карта медиа должна оставаться лёгкой: иначе облако её не примет и фото «пропадут» у других.
@@ -671,10 +756,11 @@ function cloudBigPush(){
         const stamp=Date.now();
         const versBody={};versBody[rtN(ck)]=stamp;
         cloudKnownSet(ck,stamp);
-        /* точечный PUT к листу: корневой PATCH у части сетей блокируется */
+        /* точечный PUT к листу: корневой PATCH у части сетей блокируется.
+           штампы медиа пишем в отдельный лёгкий узел — общую карту версий не раздуваем */
         const rs=await Promise.all([
           cloudFetch(root2.slice(0,-5)+rtN(ck)+'.json',{method:'PUT',body:JSON.stringify(data)}),
-          cloudFetch(root2.slice(0,-5)+rtN(CVKEY)+'.json',{method:'PATCH',body:JSON.stringify(versBody)})
+          cloudFetch(root2.slice(0,-5)+CMMVER+'.json',{method:'PATCH',body:JSON.stringify(versBody)})
         ]);
         if(rs.every(r=>r.ok)){cloudOK=true;cloudErr='';cloudLast=Date.now();try{cloudChip()}catch(e2){}}
       }catch(e){}
@@ -750,13 +836,23 @@ function pollDelay(){
 function cloudStart(){
   if(!cloudEnabled()){if(cloudTimer){clearTimeout(cloudTimer);cloudTimer=null;}return;}
   if(cloudTimer)clearTimeout(cloudTimer);
+  cloudFails=0;
   cloudPullAll().then(n=>{try{cloudChip()}catch(e){}try{cloudSeedMissing()}catch(e){}if(n)cloudRefresh();try{checkAllCollections()}catch(e){}try{refreshChips()}catch(e){}});
   const tick=async()=>{
     cloudTimer=null;
     if(document.hidden){cloudTimer=setTimeout(tick,3000);return;}
-    try{const n=await cloudPoll();if(n)cloudRefresh();}catch(e){}
+    try{
+      const n=await cloudPoll();
+      if(n)cloudRefresh();
+      /* связь вернулась — отступ сбрасываем, опрашиваем как обычно */
+      if(cloudOK)cloudFails=0;
+      else cloudFails++;
+    }catch(e){cloudFails++;}
     try{cloudChip()}catch(e){}
-    cloudTimer=setTimeout(tick,pollDelay());
+    /* при сбоях не долбим сервер: пауза растёт до минуты, потом повтор */
+    let d=pollDelay();
+    if(!cloudOK&&cloudFails>0)d=Math.min(60000,d*Math.min(8,Math.pow(2,cloudFails)));
+    cloudTimer=setTimeout(tick,d);
   };
   cloudTimer=setTimeout(tick,pollDelay());
   if(!cloudVisHook){
@@ -765,6 +861,13 @@ function cloudStart(){
       if(document.hidden||cloudTimer===null&&!cloudPolling)return;
       if(document.hidden)return;
       cloudPoll().then(n=>{try{cloudChip()}catch(e){}if(n)cloudRefresh();});
+    });
+    /* интернет пропал и вернулся — сразу тянем мир, не ждём ближайшего тика */
+    window.addEventListener('online',()=>{
+      cloudFails=0;
+      cloudPullAll().then(n=>{try{cloudChip()}catch(e){}if(n)cloudRefresh();}).catch(()=>{});
+      if(cloudTimer){clearTimeout(cloudTimer);cloudTimer=null;}
+      cloudTimer=setTimeout(tick,pollDelay());
     });
   }
 }
@@ -1682,6 +1785,13 @@ function giftCatalog(){
   let changed=(raw===null);
   /* каждому подарку — постоянный номер #N, заодно выкидываем старые смайлики */
   list=list.filter(g=>{if(SEED_GIFT_IDS.includes(g.id)&&!g.mid){changed=true;return false}return true});
+  /* надгробия: удалённый админом подарок не показывается никому и никогда */
+  try{
+    const tb=load(LS.tomb,{})||{};
+    const before=list.length;
+    list=list.filter(g=>!(g&&g.id&&tb[tombKey(LS.catalog,g.id)]!==undefined));
+    if(list.length!==before)changed=true;
+  }catch(e){}
   list.forEach((g,i)=>{if(!g.n){g.n=i+1;changed=true;}});
   if(changed)save(LS.catalog,list);
   /* сумки чистим при каждом чтении — облако могло вернуть старый сид обратно */
@@ -1907,8 +2017,8 @@ function whenMediaURL(id,cb){
 let __giftPh=0;
 function giftImgHTML(g,sz){
   const rar=(g&&g.r)||'common';
-  /* размер подгоняется при добавлении подарка: 0.5 — мельче, 1.5 — крупнее */
-  const z=Math.max(.4,Math.min(1.6,Number(g&&g.zoom)||1));
+  /* размер у всех подарков ровный: старый ползунок убрали, сохранённый зум не применяем */
+  const z=1;
   sz=Math.max(8,Math.round(sz*z));
   let inner;
   const mid=g&&g.mid;
@@ -1990,7 +2100,7 @@ function renderUserPage(){
   const dn=pd.dn||u;
   const online=isOnline(u);
   const ownTrack=tracksAll().find(x=>x.id===pd.profileTrackId);
-  const cov=ownTrack?((ownTrack.coverMid&&mediaURL(ownTrack.coverMid))?'<img src="'+mediaURL(ownTrack.coverMid)+'">':esc((ownTrack.cover||'').slice(0,3)||'🎵')):'🎵';
+  const cov=ownTrack?((ownTrack.coverMid&&mediaURL(ownTrack.coverMid))?'<img src="'+mediaURL(ownTrack.coverMid)+'">':(ownTrack.coverUrl?'<img src="'+esc(ownTrack.coverUrl)+'" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode(\'🎵\'))">':esc((ownTrack.cover||'').slice(0,3)||'🎵'))):'🎵';
   /* если есть фото — фон рисует только <img>, иначе картинка дублируется квадратиком */
   const bannerStyle=(pd.grad&&!(pd.banner&&pd.banner.mid))?'background:'+((GRADS.find(g=>g.n===pd.grad)||{}).g||''):'';
   const np=nowPlayingOf(u);
@@ -2603,9 +2713,7 @@ function tbPropose(body,rail){
     <div style="display:flex;gap:8px;flex-wrap:wrap" id="pfRars">
       ${['common','rare','pizdets','ebat','ahuy'].map(r=>`<button type="button" class="minibtn rarbtn rar-${r}${((window.__pfR||'common')===r)?' on':''}" data-r="${r}">${RARITY[r]}</button>`).join('')}
     </div>
-    <label class="f-lbl">Размер подарка · <b id="pfZoomVal">${window.__pfZoom||100}%</b></label>
-    <input type="range" id="pfZoom" min="50" max="160" step="5" value="${window.__pfZoom||100}" style="width:100%;accent-color:var(--acc)">
-    <div class="from-line">подгони размер так, чтобы подарок смотрелся ровно — рамка подстроится сама</div>
+    <div class="from-line">размер у всех подарков ровный — рамка подстроится сама</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div><label class="f-lbl">Автор дизайна</label><input class="inp-line" id="pfA1" placeholder="@юзернейм" value="${window.__pfA1||('@'+me.user)}"></div>
       <div><label class="f-lbl">Второй автор</label><input class="inp-line" id="pfA2" placeholder="@юзернейм (необязательно)" value="${window.__pfA2||''}"></div>
@@ -2624,7 +2732,6 @@ function tbPropose(body,rail){
     const pv=body.querySelector('#pfPrev');pv.innerHTML='';
     const im=document.createElement('img');im.src=URL.createObjectURL(f);im.className='prop-prev';im.style.borderStyle='solid';
     pv.replaceWith(im);im.id='pfPrev';
-    try{zoomApply();}catch(e){}
     fi.value='';
   };
   body.querySelector('#pfPick').onclick=()=>fi.click();
@@ -2633,16 +2740,7 @@ function tbPropose(body,rail){
     window.__pfR=b.dataset.r;
     body.querySelectorAll('#pfRars .rarbtn').forEach(x=>x.classList.toggle('on',x===b));
   });
-  /* живой предпросмотр размера */
-  const zoomInp=body.querySelector('#pfZoom');
-  const zoomApply=()=>{
-    const z=Math.max(.5,Math.min(1.6,(Number(zoomInp.value)||100)/100));
-    window.__pfZoom=Number(zoomInp.value)||100;
-    const lab=body.querySelector('#pfZoomVal');if(lab)lab.textContent=Math.round(z*100)+'%';
-    const im=body.querySelector('#pfPrev img')||(body.querySelector('#pfPrev')&&body.querySelector('#pfPrev').tagName==='IMG'?body.querySelector('#pfPrev'):null);
-    if(im){im.style.transform='scale('+z+')';im.style.transformOrigin='center';}
-  };
-  if(zoomInp){zoomInp.oninput=zoomApply;zoomApply();}
+  /* размер у всех подарков одинаковый — ползунка больше нет */
   body.querySelector('#pfGo').onclick=()=>{
     const name=body.querySelector('#pfName').value.trim();
     const price=Math.floor(Number(body.querySelector('#pfPrice').value)||0);
@@ -2650,7 +2748,7 @@ function tbPropose(body,rail){
     const a1=body.querySelector('#pfA1').value.trim().replace(/^@/,'');
     const a2=body.querySelector('#pfA2').value.trim().replace(/^@/,'');
     const cmt=body.querySelector('#pfCmt').value.trim();
-    const zoom=Math.max(.5,Math.min(1.6,(Number((body.querySelector('#pfZoom')||{}).value)||100)/100));
+    const zoom=1;
     window.__pfName=name;window.__pfPrice=body.querySelector('#pfPrice').value;window.__pfA1=body.querySelector('#pfA1').value;window.__pfA2=body.querySelector('#pfA2').value;window.__pfCmt=cmt;
     const r=window.__pfR||'common';
     if(!pfFile){toast('выбери картинку подарка');return;}
@@ -2675,7 +2773,7 @@ function tbPropose(body,rail){
         addLog('gift',me.user,'предложил подарок «'+name+'»');
         toast('отправлено в предложку — админ рассмотрит');
       }
-      pfFile=null;window.__pfName=window.__pfPrice=window.__pfA1=window.__pfA2=window.__pfCmt='';window.__pfR='common';window.__pfZoom=100;
+      pfFile=null;window.__pfName=window.__pfPrice=window.__pfA1=window.__pfA2=window.__pfCmt='';window.__pfR='common';
       syncGiftBadge();renderGifts();
     });
   };
@@ -3159,18 +3257,13 @@ document.getElementById('regForm').onsubmit=async e=>{
   }catch(e){}
   addLog('register',u,'аккаунт создан навсегда');
   form.querySelector('.err-line')?.remove();
-  const okBox=document.createElement('div');
-  okBox.className='err-line';okBox.style.cssText='color:var(--good);font-size:13px;margin-top:10px';
-  okBox.textContent='аккаунт сохранён навсегда! теперь войди';
-  form.appendChild(okBox);
-  setTimeout(()=>{
-    liUser.value=u;
-    try{liUser.dataset.afTouched='1';}catch(e){}
-    liErr.textContent='';
-    rUser.value='';rPass.value='';rPass2.value='';rSecret.value='';rScore.textContent='';buildCaptcha();
-    okBox.remove();showScreen(scrLogin);liUser.focus();
-    toast('аккаунт готов! внедряйся');
-  },1200);
+  /* регистрация сразу логинит: ничего вводить второй раз не нужно */
+  accs[u].lastLogin=now();encSave(LS.acc,accs);
+  setSession({user:u,ava:accs[u].ava,temporary:false});
+  addLog('login',u,'вход (запомнён) — сразу после регистрации');
+  rUser.value='';rPass.value='';rPass2.value='';rSecret.value='';rScore.textContent='';buildCaptcha();
+  enterFeed();
+  toast('аккаунт готов, ты уже на сайте! добро пожаловать 🐾');
 };
 document.getElementById('goReg').onclick=()=>{
   document.getElementById('regForm').querySelector('.err-line')?.remove();
@@ -3876,7 +3969,7 @@ function renderPfTrack(){
   const pr=prof();
   const t=tracksAll().find(x=>x.id===pr.profileTrackId);
   const trs=tracksAll().filter(x=>x.origin==='local');
-  const cov=t?((t.coverMid&&mediaURL(t.coverMid))?'<img src="'+mediaURL(t.coverMid)+'">':esc((t.cover||'').slice(0,3)||'🎵')):'🎵';
+  const cov=t?((t.coverMid&&mediaURL(t.coverMid))?'<img src="'+mediaURL(t.coverMid)+'">':(t.coverUrl?'<img src="'+esc(t.coverUrl)+'" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode(\'🎵\'))">':esc((t.cover||'').slice(0,3)||'🎵'))):'🎵';
   box.innerHTML=`<div style="display:flex;align-items:center;gap:10px">
     ${t?`<div class="tcover" style="width:44px;height:44px;font-size:18px">${cov}</div>
     <div style="flex:1;min-width:0">
@@ -4546,7 +4639,16 @@ async function publishUpload(){
 }
 
 /* ============ ООMY SOUND (страница музыки) ============ */
-function tracksAll(){return load(LS.tracks,[]);}
+function tracksAll(){
+  /* надгробия: удалённый (админом или вручную) трек не воскресает из облака или снимка мира */
+  const arr=load(LS.tracks,[]);
+  try{
+    const tb=load(LS.tomb,{})||{};
+    const keep=arr.filter(t=>!(t&&t.id!==undefined&&tb[tombKey(LS.tracks,t.id)]!==undefined));
+    if(keep.length!==arr.length){save(LS.tracks,keep);return keep;}
+  }catch(e){}
+  return arr;
+}
 function tracksSave(t){save(LS.tracks,t);}
 function trackOwner(t){return t&&(t.owner||t.artist)||''}
 function isMyTrack(t){return t.origin==='local'&&(t.owner?t.owner===me.user:(t.artist||'')===me.user)}
@@ -5512,6 +5614,7 @@ function trackMenu(e,t){
     }});
     items.push({t:'удалить трек',danger:true,f:()=>{
       const all=tracksAll();const cur=player.currentId===t.id;
+      tombAdd(LS.tracks,t.id);
       const keep=all.filter(x=>x.id!==t.id);
       save(LS.tracks,keep);
       const m=load(LS.media,{});if(t.mid&&!keep.some(x=>x.mid===t.mid))delete m[t.mid];save(LS.media,m);
@@ -5532,7 +5635,7 @@ function trackMenu(e,t){
     }});
   }else{
     items.push({t:'открыть на звуке',f:()=>{window.open(t.scUrl,'_blank');}});
-    items.push({t:'убрать из списка',danger:true,f:()=>{save(LS.tracks,tracksAll().filter(x=>x.id!==t.id));renderSound();}});
+    items.push({t:'убрать из списка',danger:true,f:()=>{tombAdd(LS.tracks,t.id);save(LS.tracks,tracksAll().filter(x=>x.id!==t.id));renderSound();}});
   }
   menuPop(e.clientX,e.clientY,items);
 }
@@ -6813,7 +6916,7 @@ function renderAdmin(){
     });
     set('<div class="adm-note">все треки — приватность/удаление</div>'+(trs.map(t=>`<div class="adm-row"><span style="font-size:17px">${esc(t.cover||'🎵')}</span><b>${esc(t.name)} · ${esc(t.artist||'—')} · ▶${t.plays||0}</b><button class="minibtn" data-atp="${t.id}">${t.priv?'сделать публичным':'в приватные'}</button><button class="x" data-atd="${t.id}">✕</button></div>`).join('')||'<div class="adm-note">треков нет</div>'));
     body.querySelectorAll('[data-atp]').forEach(b=>b.onclick=()=>{const all=tracksAll(),t=all.find(x=>x.id===b.dataset.atp);if(t){t.priv=!t.priv;tracksSave(all);addLog('admin',me.user,(t.priv?'скрыл':'открыл')+' трек «'+t.name+'»');}box.querySelector('#aTracks').click();});
-    body.querySelectorAll('[data-atd]').forEach(b=>b.onclick=()=>{if(!confirm('удалить трек навсегда?'))return;save(LS.tracks,tracksAll().filter(t=>t.id!==b.dataset.atd));addLog('admin',me.user,'удалил трек');if(player.currentId===b.dataset.atd)pausePlayer();box.querySelector('#aTracks').click();});
+    body.querySelectorAll('[data-atd]').forEach(b=>b.onclick=()=>{if(!confirm('удалить трек навсегда?'))return;tombAdd(LS.tracks,b.dataset.atd);sweepTombstones();addLog('admin',me.user,'удалил трек навсегда');if(player.currentId===b.dataset.atd)pausePlayer();box.querySelector('#aTracks').click();});
   };
   box.querySelector('#aStories').onclick=()=>{
     const live=encLoad(LS.acc,{});
@@ -6824,7 +6927,7 @@ function renderAdmin(){
   box.querySelector('#aCatalog').onclick=()=>{
     const cat=giftCatalog();
     set('<div class="adm-note">магазин подарков ('+cat.length+')</div>'+cat.map(g=>`<div class="adm-row">${giftImgHTML(g,30)}<b>${esc(g.name)} · ${g.price} оонеток · тираж ${g.tiraj}</b><button class="x" data-agd="${g.id}">✕</button></div>`).join('')||'<div class="adm-note">магазин пуст — добавь подарок в «подарочки → магазин»</div>');
-    body.querySelectorAll('[data-agd]').forEach(b=>b.onclick=()=>{saveCatalog(giftCatalog().filter(g=>g.id!==b.dataset.agd));const gone=cleanBag();addLog('admin',me.user,'удалил подарок'+(gone?', из сумок убрано: '+gone:''));box.querySelector('#aCatalog').click();});
+    body.querySelectorAll('[data-agd]').forEach(b=>b.onclick=()=>{if(!confirm('удалить подарок навсегда — из магазина, сумок и барахолки?'))return;tombAdd(LS.catalog,b.dataset.agd);saveCatalog(giftCatalog().filter(g=>g.id!==b.dataset.agd));const gone=cleanBag();sweepTombstones();addLog('admin',me.user,'удалил подарок навсегда'+(gone?', из сумок убрано: '+gone:''));box.querySelector('#aCatalog').click();});
   };
   box.querySelector('#aBadges').onclick=()=>{
     const all=badgesAll();
@@ -6975,14 +7078,17 @@ const snowCtx=snowCv?snowCv.getContext('2d'):null;
 let snowFlakes=[],snowRaf=0,snowT=0,snowOn=load('oomy.snow',true);
 function snowResize(){if(!snowCv)return;snowCv.width=innerWidth;snowCv.height=innerHeight;}
 function snowInit(){snowFlakes=Array.from({length:Math.max(40,Math.round(innerWidth/13))},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:1+Math.random()*2.6,s:.12+Math.random()*.28,d:Math.random()*.5-.25,w:Math.random()*Math.PI*2}));}
-function snowLoop(){
+function snowLoop(ts){
   if(!snowOn||!snowCtx)return;
   snowRaf=requestAnimationFrame(snowLoop);
-  snowT+=.01;
+  /* движение по времени, а не по кадрам: если браузер подтормозил (тяжёлая страница,
+     скрытая вкладка), снежинки догоняют плавно и не «зависают» */
+  const dt=Math.min(.05,(ts-(snowLast||ts))/1000);snowLast=ts;
+  snowT+=dt;
   snowCtx.clearRect(0,0,snowCv.width,snowCv.height);
   snowCtx.fillStyle='#fff';
   snowFlakes.forEach(f=>{
-    f.y+=f.s;f.x+=f.d+Math.sin(snowT+f.w)*.4;
+    f.y+=f.s*dt*60;f.x+=(f.d+Math.sin(snowT+f.w)*.4)*dt*60;
     if(f.y>snowCv.height+8){f.y=-8;f.x=Math.random()*snowCv.width;}
     if(f.x>snowCv.width+8)f.x=-8;if(f.x<-8)f.x=snowCv.width+8;
     snowCtx.globalAlpha=Math.min(.95,.35+f.r*.2);
@@ -6990,14 +7096,21 @@ function snowLoop(){
   });
   snowCtx.globalAlpha=1;
 }
+let snowLast=0;
 function setSnow(on){
   snowOn=!!on;save('oomy.snow',snowOn);
   const b=document.getElementById('snowBtn');
   if(b)b.classList.toggle('off',!snowOn);
   if(snowCv)snowCv.style.display=snowOn?'':'none';
-  cancelAnimationFrame(snowRaf);
+  cancelAnimationFrame(snowRaf);snowLast=0;
   if(snowOn){snowResize();snowInit();snowRaf=requestAnimationFrame(snowLoop);}
 }
+/* скрытая вкладка — снежинки спят, вернулись — плавно продолжили */
+document.addEventListener('visibilitychange',()=>{
+  if(!snowCtx)return;
+  if(document.hidden){cancelAnimationFrame(snowRaf);snowRaf=0;}
+  else if(snowOn&&!snowRaf){snowLast=0;snowRaf=requestAnimationFrame(snowLoop);}
+});
 window.addEventListener('resize',()=>{if(snowOn){snowResize();snowInit();}});
 const snowBtnEl=document.getElementById('snowBtn');
 if(snowBtnEl)snowBtnEl.onclick=()=>{setSnow(!snowOn);toast(snowOn?'снежинки включены ❄':'снежинки выключены');};
@@ -7232,6 +7345,8 @@ function applyPublicWorld(){
       const v=D[k];
       setStr(k,typeof v==='string'?v:JSON.stringify(v));
     });
+    /* надгробия из снимка главнее данных снимка: удалённое раньше не прорастёт */
+    try{sweepTombstones()}catch(e){}
     markVer();
     return true;
   }
@@ -7272,9 +7387,21 @@ function applyPublicWorld(){
     byId.set(String(p.id),c);
   });
   setRaw(LS.posts,[...byId.values()].sort((a,b)=>(b.id||0)-(a.id||0)));
-  /* каталоги сайта — целиком из снимка */
-  [LS.catalog,LS.groups,LS.tracks,LS.playlists,LS.stories,LS.badges,LS.colls].forEach(k=>{
-    if(k in D)setRaw(k,D[k]);
+  /* каталоги сайта: группы/плейлисты/сторис/значки/коллекции — целиком из снимка,
+     а каталог подарков и музыка СЛИВАЮТСЯ по id: свой новый трек или подарок
+     не выкидывается, а удалённое (надгробия) не возвращается из снимка */
+  [LS.groups,LS.playlists,LS.stories,LS.badges,LS.colls].forEach(k=>{if(k in D)setRaw(k,D[k]);});
+  [LS.catalog,LS.tracks].forEach(k=>{
+    if(!(k in D))return;
+    const snap=Array.isArray(D[k])?D[k]:[];
+    const local=load(k,[]);
+    const m=new Map();
+    (Array.isArray(local)?local:[]).concat(snap).forEach(x=>{
+      if(!x||x.id===undefined)return;
+      if(tomb[worldTombKey(k,x.id)])return;
+      m.set(String(x.id),x);
+    });
+    setRaw(k,[...m.values()]);
   });
   /* карты по котикам: объединяем, значение из снимка главнее */
   const unionUsers=(key,itemKey)=>{
@@ -7431,16 +7558,9 @@ function purgeTraces(alive){
     const n=st.filter(s=>s&&(!s.user||has(s.user)));
     if(n.length!==st.length)saveIf(LS.stories,n);
   }
-  /* треки, группы, плейлисты: чужое не показываем, группы умерших забирает сайт */
-  const tr=load(LS.tracks,null);
-  if(Array.isArray(tr)){
-    const n=tr.filter(t=>{
-      if(!t||t.origin!=='local')return true;
-      const o=t.owner||t.artist||'';
-      return !o||has(o);
-    });
-    if(n.length!==tr.length)saveIf(LS.tracks,n);
-  }
+  /* треки НЕ чистим: они остаются навсегда, удалить может только человек
+     (вручную или админ). раньше чистка выкидывала треки, владелец которых
+     не нашёлся в аккаунтах этого браузера — из-за них музыка «пропадала» */
   const gr=load(LS.groups,null);
   if(Array.isArray(gr)){
     let ch=false;
@@ -7566,6 +7686,7 @@ function ensureAccounts(){
     if(applyPublicWorld())console.log('oomy: публичный мир обновлён');
   }catch(e){console.warn('oomy world',e);}
   try{healWorld();}catch(e){}
+  try{sweepTombstones();}catch(e){}
   /* рабочий ключ по умолчанию: 1 ключ = 500 оонеток */
   if(!Object.keys(load(LS.keys,{})).length)save(LS.keys,{'OOMY-NEKO-0500-2026':{a:500,used:false}});
   try{cleanBag()}catch(e){}
@@ -7595,8 +7716,14 @@ function ensureAccounts(){
   }else{
     const got=await restoreFromMirror();
     if(got)console.log('oomy: восстановлено '+got+' ключей из зеркала');
-    /* общий мир: подтягиваем всё с сервера до входа, чтобы видны были все котики */
-    if(cloudEnabled())await cloudPullAll();
+    /* зеркало могло вернуть и сессию: тогда сразу в ленту, без лишнего входа */
+    if(load(LS.sess,null)){
+      await Promise.resolve();
+      enterFeed();
+    }else{
+      /* общий мир: подтягиваем всё с сервера до входа, чтобы видны были все котики */
+      if(cloudEnabled())await cloudPullAll();
+    }
     try{healWorld();}catch(e){}
     liUser.focus();
   }
