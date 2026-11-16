@@ -8,7 +8,7 @@ const LS={acc:'oomy.avault',logs:'oomy.lvault',posts:'oomy.posts',sess:'oomy.ses
           notifSeen:'oomy.notifSeen',feedSeen:'oomy.feedSeen',buyHist:'oomy.buyHist',giftChain:'oomy.giftChain',mkt:'oomy.mkt',wins:'oomy.wins',
           friends:'oomy.friends',freq:'oomy.friendReq',bookmarks:'oomy.bookmarks',seen:'oomy.seen',
           visitors:'oomy.visitors',daily:'oomy.daily',blocks:'oomy.blocks',cloud:'oomy.cloud',tomb:'oomy.tomb',
-          badges:'oomy.badges',badgeOwn:'oomy.badgeOwn',colls:'oomy.colls',now:'oomy.now',
+          badges:'oomy.badges',badgeOwn:'oomy.badgeOwn',colls:'oomy.colls',now:'oomy.now',skin:'oomy.skin',
           msgTomb:'oomy.msgTomb',chatTomb:'oomy.chatTomb'};
 const ADMIN='oomy'; /* аккаунт главного администратора */
 const XKEY='пушистый-ключ-neko-2026-厚い猫';
@@ -316,7 +316,7 @@ function chatStreamStart(name){
 function cloudExclKey(k){
   /* служебные метки публичного мира живут только в браузере: в облако их не шлём */
   if(typeof k==='string'&&k.indexOf('oomy.hide__')===0)return true;
-  return [LS.sess,LS.theme,LS.accent,LS.cloud,'oomy.versKnown','oomy.lastPage','oomy.games','oomy.view',
+  return [LS.sess,LS.theme,LS.accent,LS.cloud,'oomy.versKnown','oomy.lastPage','oomy.games','oomy.view','oomy.skin','oomy.pwaHint',
     'oomy.worldVer','oomy.worldAuthor','oomy.worldAccs'].includes(k)
 }
 /* чаты сливает специальный mergeChats (там перспектива «моё/чужое»), а не общий mergeCloud */
@@ -1412,6 +1412,78 @@ function syncNowPlaying(on){
     save(LS.now,map);
   }catch(e){}
 }
+/* ---- витрина подарочков: компактные плитки, номер копии и подсказка при наведении ---- */
+function giftTirajOf(gid){
+  const g=gid?giftCatalog().find(z=>z.id===gid):null;
+  return g?(g.tiraj||100):0;
+}
+function shelfHeaderHTML(owner,bagCount){
+  const own=owner===(me&&me.user);
+  return `<div class="shelf-head">
+    <h3>витрина<span class="shelf-count">${bagCount}</span></h3>
+    <div class="shelf-links">
+      <span class="link" data-shelf-all="1">все подарки</span>
+      ${own?'<span class="link" data-shelf-setup="1">настроить</span>':''}
+    </div>
+  </div>`;
+}
+function shelfTileHTML(x,attrs){
+  const g=x.g,gi=x.gi;
+  const gg=g.gid?giftCatalog().find(z=>z.id===g.gid):null;
+  const tiraj=gg?(gg.tiraj||100):0;
+  const num=g.cn?('#'+g.cn+(tiraj?'/'+tiraj:'')):'';
+  const tip=(bagItemName(g))+(num?' · '+num:'')+(gg&&gg.r?' · '+RARITY[gg.r||'common']:'');
+  const rar=gg&&gg.r?'rar-'+(gg.r||'common'):'rar-common';
+  return `<span class="pf-gift" ${attrs||''} data-tip="${esc(tip)}" aria-label="${esc(tip)}">${bagItemHTML(g,64)}<span class="pf-gift-num ${rar}">${num||'—'}</span></span>`;
+}
+function shelfGridHTML(items,owner){
+  const own=owner===(me&&me.user);
+  return items.slice(0,10).map(x=>shelfTileHTML(x,own?`data-pfgift="${x.gi}"`:`data-gift="${x.gi}" data-gowner="${esc(owner)}"`)).join('')||'<span class="empty-shelf">витрина пустая — поставь подарочки из сумки</span>';
+}
+/* ---- значки под витриной: картинка и название показываются поочерёдно ---- */
+function badgeStripHTML(u){
+  const list=shownBadges(u);
+  if(!list.length)return '<div class="from-line" style="padding:2px 0">значков пока нет — их выдаёт администратор или дают за коллекцию подарков</div>';
+  return '<div class="badge-strip">'+list.map((b,i)=>{
+    const tip=esc((b.name||'значок')+(b.hint?' — '+b.hint:''));
+    return `<span class="bdg-flip" style="--i:${i}" title="${tip}"><span class="bf-ico">${badgeImgHTML(b,true)}</span><span class="bf-name">${esc(b.name||'значок')}</span></span>`;
+  }).join('')+'</div>';
+}
+/* ---- «сейчас слушает»: карточка с обложкой, эквалайзером и мини-плеером ---- */
+function listenCardHTML(np){
+  if(!np)return '';
+  const t=(tracksAll()||[]).find(x=>x.id===np.id);
+  const cov=t?coverHTMLFor(t):'🎵';
+  const on=player&&player.currentId===np.id&&player.playing;
+  return `<div class="listen-card" data-nowtrack="${esc(np.id)}" title="открыть трек в oomy music">
+    <div class="listen-cover">${cov}<span class="eq3${on?'':' paused'}"><i></i><i></i><i></i><i></i></span></div>
+    <div class="listen-mid">
+      <span class="listen-label">${on?'<span class="eq3"><i></i><i></i><i></i><i></i></span>':'♫'} сейчас слушает</span>
+      <div class="listen-name">${esc(np.name)}</div>
+      <div class="listen-artist">${np.artist?esc(np.artist):'oomy music'}</div>
+    </div>
+    <button class="listen-btn" data-listen-play="1" title="${on?'пауза':'включить'}">${on?'⏸':'▶'}</button>
+  </div>`;
+}
+function wireListenCards(scope){
+  (scope||document).querySelectorAll('[data-listen-play]').forEach(btn=>{
+    if(btn._wired)return;btn._wired=true;
+    btn.onclick=e=>{
+      e.stopPropagation();
+      const card=btn.closest('[data-nowtrack]');
+      const id=card&&card.dataset.nowtrack;
+      if(!id)return;
+      if(player.currentId===id&&player.playing){try{pausePlayer()}catch(err){}}
+      else{try{playQueueFrom(id)}catch(err){}}
+      setTimeout(()=>{
+        const on=player.currentId===id&&player.playing;
+        btn.textContent=on?'⏸':'▶';
+        const eq=card.querySelector('.listen-cover .eq3');if(eq)eq.classList.toggle('paused',!on);
+      },350);
+    };
+  });
+}
+
 
 
 /* ============ ООНЕТКИ (валюта oomy) ============ */
@@ -2330,7 +2402,7 @@ function bagItemName(it){
   if(it.gid){const g=giftCatalog().find(x=>x.id===it.gid);return g?g.name:'подарок удалён'}
   return LEGACY_GIFTS[it.ic]||'подарочек';
 }
-function userLink(u,label){return '<span class="g-auth" data-gu="'+esc(u)+'" style="'+nickStyle(u,!label)+'">'+(label?esc(label):'@'+esc(u))+'</span>'}
+function userLink(u,label){return '<span class="g-auth" data-gu="'+esc(u)+'" style="color:var(--text)">'+(label?esc(label):'@'+esc(u))+'</span>'}
 /* один обработчик на весь сайт: любой @юзер, аватарка или ник с data-gu ведёт на аккаунт.
    так кликабельны юзы абсолютно везде — в ленте, чате, подарках, уведомлениях и админке */
 document.addEventListener('click',e=>{
@@ -2402,7 +2474,7 @@ function renderUserPage(){
       <div style="min-width:0;flex:1">
         <div class="pf-name nick-line"><span class="nk" data-gu="${esc(u)}" style="cursor:pointer;${nickStyle(u)}">${esc(dn)}</span>${badgeFor(u)}${badgesNickHTML(u)}${nickGiftHTML(u)}${a.banned?' <span class="from-line" style="color:var(--bad)">· заблокирован</span>':''}</div>
         <div class="pf-sub">${userLink(u)}<span class="online-dot ${online?'':'off'}"></span> ${online?'в сети':esc(lastSeenText(u))}</div>
-        ${np?`<div class="pf-now" data-nowtrack="${esc(np.id)}" title="открыть в oomy music">♫ ${esc(np.name)}${np.artist?' — '+esc(np.artist):''}</div>`:''}
+        ${np?listenCardHTML(np):''}
         ${sectOn(pd,'status')&&pd.status?'<div class="pf-status">'+esc(pd.status)+'</div>':''}
         ${sectOn(pd,'bio')&&pd.bio?'<div class="pf-bio">'+esc(pd.bio)+'</div>':''}
       </div>
@@ -2412,20 +2484,14 @@ function renderUserPage(){
           :`<span id="upFriendBtns">${friendBtnHTML(u)}</span><button class="minibtn" id="upMsg">написать</button><button class="minibtn" id="upMore">⋯</button>`}
       </div>
     </div>
-    ${sectOn(pd,'stats')?`<div class="pf-stats">
-      <div class="stat"><b>${wall.filter(p=>!p.repostFrom).length}</b><span>записей</span></div>
-      <div class="stat"><b>${likes}</b><span>лайков</span></div>
-      <div class="stat"><b>${reposts}</b><span>репостов</span></div>
-      <div class="stat"><b>${trks}</b><span>треков</span></div>
-      <div class="stat"><b>${bag.length}</b><span>подарков</span></div>
-      ${isMe&&!me.guest?`<div class="stat"><b>${wallet()[u]||0}</b><span>оонеток</span></div>`:''}
+      ${sectOn(pd,'shelf')?`<div class="sect">
+      ${shelfHeaderHTML(u,shelf.length)}
+      <div class="pf-gifts">${shelfGridHTML(shelf,u)}</div>
+      ${pd.shelfCoins!==false?`<div class="shelf-oon-row"><button class="oon-chip shelf-oon" data-shelf-oon title="оонетки — валюта oomy"><b>${wallet()[u]||0}</b> оонеток</button></div>`:''}
     </div>`:''}
-    ${sectOn(pd,'shelf')?`<div class="sect">
-      <h3>полка подарочков${shelf.length?' · '+Math.min(10,shelf.length)+'/10':''}</h3>
-      <div class="pf-gifts">${shelf.slice(0,10).map(x=>{
-        const gg=x.g.gid?giftCatalog().find(z=>z.id===x.g.gid):null;
-        return `<span class="pf-gift" data-gift="${x.gi}" data-gowner="${esc(u)}" title="${esc(bagItemName(x.g))}${x.g.from?' · от '+esc(x.g.from):''}">${bagItemHTML(x.g,64)}<span class="pf-gift-name">${x.g.cn?'#'+x.g.cn+' · ':''}${esc(bagItemName(x.g))}</span>${gg?`<span class="rar-badge rar-${gg.r||'common'}" style="font-size:9px">${RARITY[gg.r||'common']}</span>`:''}</span>`}).join('')||'<span class="empty-shelf">полка пустая</span>'}</div>
-      <div class="link" style="padding-top:6px" id="upAllGifts">все подарки · ${bag.filter(g=>!g.hidden).length}</div>
+    ${sectOn(pd,'ach')?`<div class="sect">
+      <h3>значки${shownBadges(u).length?' · '+shownBadges(u).length:''}</h3>
+      ${badgeStripHTML(u)}
     </div>`:''}
     ${sectOn(pd,'track')?`<div class="sect">
       <h3>профильный трек</h3>
@@ -2461,10 +2527,6 @@ function renderUserPage(){
       <div style="display:flex;gap:8px;flex-wrap:wrap;padding:2px 0 8px">
         ${friendsOf(u).slice(0,12).map(f=>`<span class="v" data-gu="${esc(f)}" style="display:flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:4px 10px 4px 4px;font-size:12px;cursor:pointer"><span class="ava" style="width:24px;height:24px;font-size:12px">${avaHTML(f,(encLoad(LS.acc,{})[f]||{}).ava||'🐈')}</span>${esc(f)}</span>`).join('')||'<span class="fsub">пока нет друзей</span>'}
       </div>
-    </div>`:''}
-    ${sectOn(pd,'ach')?`<div class="sect">
-      <h3>значки${shownBadges(u).length?' · '+shownBadges(u).length:''}</h3>
-      ${badgesSectHTML(u)}
     </div>`:''}
     ${isMe?`<div class="sect">
       <h3>гости моей страницы</h3>
@@ -2534,9 +2596,10 @@ function renderUserPage(){
     if(tp&&ownTrack)tp.onclick=()=>{if(player.currentId===ownTrack.id){togglePlay();tp.innerHTML=player.playing?'▶':'⏸';return;}playQueueFrom(ownTrack.id);tp.innerHTML='⏸';};
   }
   box.querySelectorAll('[data-gift]').forEach(el=>el.onclick=()=>openGiftInfo(null,el.dataset.gowner,Number(el.dataset.gift)));
-  const upAllGifts=box.querySelector('#upAllGifts');
+  const upAllGifts=box.querySelector('[data-shelf-all]');
   if(upAllGifts)upAllGifts.onclick=()=>openAllGifts(u);
   box.querySelectorAll('[data-nowtrack]').forEach(el=>el.onclick=()=>{try{playQueueFrom(el.dataset.nowtrack)}catch(e){} go('sound');});
+  wireListenCards(box);
   box.querySelectorAll('[data-gu]').forEach(el=>el.onclick=()=>openUserPage(el.dataset.gu));
   wireAch(box);
   const wallBox=box.querySelector('#wallPosts');
@@ -3346,6 +3409,25 @@ function wireHoverCards(scope){
 
 /* ============ ТЕМА + АКЦЕНТ ============ */
 const themeBtn=document.getElementById('themeBtn');
+/* ---- нефор-скины: настроение оформления поверх тёмной темы ---- */
+const SKINS=[
+  {id:'',n:'обычная'},
+  {id:'noir',n:'нуар'},
+  {id:'vhs',n:'VHS'},
+  {id:'acid',n:'кислота'},
+  {id:'blood',n:'кровь'},
+  {id:'ghost',n:'призрак'},
+  {id:'dirt',n:'грязь'},
+  {id:'void',n:'пустота'},
+  {id:'sakura',n:'сакура'}
+];
+function applySkin(n,persist=true){
+  n=String(n||'');
+  if(n&&!SKINS.some(s=>s.id===n))n='';
+  if(n)document.documentElement.dataset.skin=n;else delete document.documentElement.dataset.skin;
+  save(LS.skin,n);
+  if(persist&&me&&me.user&&!me.guest){const p=prof();p.skin=n;saveProf(p);}
+}
 function applyTheme(t,persist=true){document.documentElement.dataset.theme=t;themeBtn.textContent=t==='dark'?'🌙':'🌞';save(LS.theme,t);if(persist&&me&&me.user&&!me.guest){const p=prof();p.theme=t;saveProf(p);}}
 function applyAccent(c,persist=true){
   document.documentElement.style.setProperty('--acc',c);
@@ -3396,6 +3478,7 @@ function applyThemePreset(name){
 }
 applyTheme(load(LS.theme,'dark'),false);
 applyAccent(load(LS.accent,'#7a6cff'),false);
+try{applySkin(load(LS.skin,''),false);}catch(e){}
 themeBtn.onclick=()=>{
   const next=document.documentElement.dataset.theme==='dark'?'light':'dark';
   const r=themeBtn.getBoundingClientRect(),m=Math.max(innerWidth,innerHeight)*2.4;
@@ -3833,7 +3916,7 @@ document.getElementById('search').addEventListener('input',()=>{
 });
 
 /* ============ НАВИГАЦИЯ ============ */
-const PAGES=['feed','home','groups','sound','msgs','gifts','games','casino','friends','notifs','bm','settings','admin','user','search'];
+const PAGES=['feed','home','groups','sound','rooms','msgs','gifts','games','casino','friends','notifs','bm','settings','admin','user','search'];
 let hist=['feed'],hIdx=0;
 function go(p,noHist){
   if(p==='logout'){logout();return;}
@@ -3842,6 +3925,8 @@ function go(p,noHist){
   PAGES.forEach(x=>document.getElementById('pg-'+x).classList.toggle('hidden',x!==p));
   /* ушли со страницы сообщений — живой поток чата больше не нужен */
   if(p!=='msgs'){try{chatStreamStop();}catch(e){}}
+  /* комнаты слушаем только пока страница открыта */
+  try{if(p==='rooms')roomsSyncStart();else roomsSyncStop();}catch(e){}
   if(p==='games'){try{gamesSyncStart();}catch(e){}}else{try{gamesSyncStop();}catch(e){}}
   document.querySelectorAll('#sideMenu li[data-go]').forEach(li=>li.classList.toggle('active',li.dataset.go===p));
   buildPage(p);
@@ -3861,7 +3946,7 @@ function go(p,noHist){
   /* запоминаем страницу для возврата после перезагрузки */
   try{localStorage.setItem('oomy.lastPage',JSON.stringify({p:p,u:(p==='user'?(window.__viewUser||me.user):null)}))}catch(e){}
   syncBadges();
-  document.title='oomy — '+({feed:'лента',home:'омя страничк',groups:'группы',sound:'oomy music',msgs:'личны сообще',gifts:'подарочки',games:'шпилки',casino:'казинак',friends:'друзя',notifs:'уведомлялк',bm:'закладки',settings:'настройки',admin:'админ-панель',user:'страница котика'})[p];
+  document.title='oomy — '+({feed:'лента',home:'омя страничк',groups:'группы',sound:'oomy music',rooms:'комнаты',msgs:'личны сообще',gifts:'подарочки',games:'шпилки',casino:'казинак',friends:'друзя',notifs:'уведомлялк',bm:'закладки',settings:'настройки',admin:'админ-панель',user:'страница котика'})[p];
   if(!noHist){hist=hist.slice(0,hIdx+1);hist.push(p);hIdx++;}
   window.scrollTo({top:0,behavior:'instant'});
 }
@@ -3906,12 +3991,17 @@ document.getElementById('topLogo').addEventListener('mouseenter',()=>{
 });
 document.getElementById('chipBtn').onclick=()=>go(me.guest?'settings':'home');
 document.getElementById('oonChip').onclick=()=>go('gifts');
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-shelf-oon]');
+  if(b){try{go('gifts');}catch(err){}}
+});
 function buildPage(p){
   window.__PG=p;
   if(p==='feed'){buildPosts();buildRail();renderStories();}
   if(p==='home')renderHome();
   if(p==='groups')renderGroups();
   if(p==='sound')renderSound();
+  if(p==='rooms'&&typeof renderRooms==='function')renderRooms();
   if(p==='msgs')renderChats();
   if(p==='gifts')renderGifts();
   if(p==='games')renderGames();
@@ -4362,7 +4452,7 @@ function renderHome(){
         <div style="min-width:0;flex:1">
           <div class="pf-name nick-line"><span class="nk" data-gu="${esc(me.user)}" style="cursor:pointer;${nickStyle(me.user)}">${esc(dn)}</span>${badgeFor(me.user)}${badgesNickHTML(me.user)}${nickGiftHTML(me.user)}</div>
           <div class="pf-sub">${userLink(me.user)}<span class="online-dot"></span>${isAdmin()?' главный кот сайта':''}</div>
-          ${np?`<div class="pf-now" data-nowtrack="${esc(np.id)}" title="открыть в oomy music">♫ ${esc(np.name)}${np.artist?' — '+esc(np.artist):''}</div>`:''}
+          ${np?listenCardHTML(np):''}
           ${pr.status?'<div class="pf-status" id="pfStatus">'+esc(pr.status)+'</div>':''}
           ${pr.bio?'<div class="pf-bio" id="pfBio">'+esc(pr.bio)+'</div>':''}
         </div>
@@ -4371,21 +4461,14 @@ function renderHome(){
           <button class="minibtn" id="pfShare">поделиться</button>
         </div>
       </div>
-      ${sectOn(pr,'stats')?`<div class="pf-stats">
-        <div class="stat"><b>${wall.filter(p=>!p.repostFrom).length}</b><span>записей</span></div>
-        <div class="stat"><b>${likes}</b><span>лайков</span></div>
-        <div class="stat"><b>${reposts}</b><span>репостов</span></div>
-        <div class="stat"><b>${tracksAll().filter(t=>isMyTrack(t)).length}</b><span>треков</span></div>
-        <div class="stat"><b>${myGifts().length}</b><span>подарков</span></div>
-        <div class="stat"><b>${(pr.pinned||[]).length}</b><span>закрепов</span></div>
-        ${me.guest?'':`<div class="stat"><b>${myOon()}</b><span>оонеток</span></div>`}
-      </div>`:''}
       ${sectOn(pr,'shelf')?`<div class="sect" id="pfGiftsSect">
-        <h3>полка подарочков${myShelf.length?' · '+Math.min(10,myShelf.length)+'/10':''}</h3>
-        <div class="pf-gifts" id="pfGifts">${myShelf.slice(0,10).map(x=>{
-          const gg=x.g.gid?giftCatalog().find(z=>z.id===x.g.gid):null;
-          return `<span class="pf-gift" data-pfgift="${x.gi}" title="${esc(bagItemName(x.g))}${x.g.from?' · от '+esc(x.g.from):''}">${bagItemHTML(x.g,64)}<span class="pf-gift-name">${x.g.cn?'#'+x.g.cn+' · ':''}${esc(bagItemName(x.g))}</span>${gg?`<span class="rar-badge rar-${gg.r||'common'}" style="font-size:9px">${RARITY[gg.r||'common']}</span>`:''}</span>`}).join('')||'<span class="empty-shelf">полка пустая — загляни в подарочки 🎁</span>'}</div>
-        <div class="link" style="padding-top:6px" id="pfAllGifts">все подарки · ${myGifts().filter(g=>!g.hidden).length}</div>
+        ${shelfHeaderHTML(me.user,myShelf.length)}
+        <div class="pf-gifts" id="pfGifts">${shelfGridHTML(myShelf,me.user)}</div>
+        ${me.guest||pr.shelfCoins===false?'':`<div class="shelf-oon-row"><button class="oon-chip shelf-oon" data-shelf-oon title="оонетки — валюта oomy. нажми: подарочки"><b>${myOon()}</b> оонеток</button></div>`}
+      </div>`:''}
+      ${sectOn(pr,'ach')?`<div class="sect">
+        <h3>значки${shownBadges(me.user).length?' · '+shownBadges(me.user).length:''}</h3>
+        ${badgeStripHTML(me.user)}
       </div>`:''}
       ${sectOn(pr,'status')?`<div class="sect">
         <h3>статус</h3>
@@ -4426,10 +4509,6 @@ function renderHome(){
           ${friendsOf(me.user).slice(0,12).map(u=>`<span class="v" data-gu="${esc(u)}" style="display:flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:4px 10px 4px 4px;font-size:12px;cursor:pointer"><span class="ava" style="width:24px;height:24px;font-size:12px">${avaHTML(u,(encLoad(LS.acc,{})[u]||{}).ava||'🐈')}</span>${esc(u)}</span>`).join('')||'<span class="fsub">пока нет друзей — загляни в раздел «друзья»</span>'}
         </div>
       </div>`:''}
-      ${sectOn(pr,'ach')?`<div class="sect">
-        <h3>значки${shownBadges(me.user).length?' · '+shownBadges(me.user).length:''}</h3>
-        ${badgesSectHTML(me.user)}
-      </div>`:''}
       ${sectOn(pr,'guests')?`<div class="sect">
         <h3>гости моей страницы</h3>
         <div class="visitors">${visitorsOf(me.user).slice(0,10).map(v=>`<span class="v" data-gu="${esc(v.from)}"><span class="ava" style="width:24px;height:24px;font-size:12px">${avaHTML(v.from,'🐈')}</span>${esc(v.from)}</span>`).join('')||'<span class="fsub">пока никто не заглянул</span>'}</div>
@@ -4457,7 +4536,9 @@ function renderHome(){
   box.querySelectorAll('[data-gu]').forEach(el=>el.onclick=()=>openUserPage(el.dataset.gu));
   box.querySelectorAll('[data-pfgift]').forEach(el=>el.onclick=()=>openGiftInfo(null,me.user,Number(el.dataset.pfgift)));
   box.querySelectorAll('[data-nowtrack]').forEach(el=>el.onclick=()=>{try{playQueueFrom(el.dataset.nowtrack)}catch(e){} go('sound');});
-  const pfa=box.querySelector('#pfAllGifts');if(pfa)pfa.onclick=()=>openAllGifts(me.user);
+  wireListenCards(box);
+  const pfa=box.querySelector('[data-shelf-all]');if(pfa)pfa.onclick=()=>openAllGifts(me.user);
+  const pfs=box.querySelector('[data-shelf-setup]');if(pfs)pfs.onclick=()=>{go('gifts');try{giftTab='bag';renderGifts();}catch(e){} };
   const bmWrap=document.getElementById('homeBookmarks');
   if(bmWrap){
     const ids=bookmarksOf(me.user);
@@ -4499,6 +4580,13 @@ function renderHome(){
   }
   try{wireBannerDrag(box,me&&me.user);}catch(e){}
   try{fillBannerMedia(box,pr.banner);}catch(e){}
+  /* вход в комнаты прослушивания прямо с главной */
+  try{
+    box.insertAdjacentHTML('beforeend',roomsTeaserHTML());
+    const hr=box.querySelector('#homeRooms');
+    if(hr)hr.onclick=()=>go('rooms');
+    roomsPeek();
+  }catch(e){}
 }
 function renderWall(){
   const wrap=document.getElementById('wallPosts');if(!wrap)return;
@@ -5022,6 +5110,83 @@ function soundFiltered(list){
   else out.sort((a,b)=>(b.id||'').localeCompare(a.id||''));
   return out;
 }
+/* ---------- ПРИКОЛЯХИ: уютные разделы внутри oomy music (комнаты и не только) ---------- */
+function prikolRoomsHTML(){
+  const list=(typeof roomsList==='function')?roomsList():[];
+  if(!list.length)return '<div class="snd-empty">комнат пока нет — создай первую и позови котиков 🎧</div>';
+  return list.map(r=>{
+    let mem=0;try{mem=roomMembers(r).length}catch(e){}
+    return `<button class="prikol-room" data-proom="${esc(r.id)}">
+      <span class="prikol-room-ico">${r.cur?'🎵':'🎧'}</span>
+      <span class="prikol-room-mid"><b>${esc(r.name||'комната')}</b><span>${userLink(r.by||'—')} · ${mem?mem+' слушают':'свободно'}${r.cur?' · '+esc(r.cur.name):''}</span></span>
+      <span class="prikol-go">войти →</span>
+    </button>`;
+  }).join('');
+}
+function prikolLiveText(){
+  let list=[];try{list=roomsList()}catch(e){}
+  const live=list.filter(r=>{try{return roomMembers(r).length}catch(e){return false}});
+  return live.length?live.length+' в эфире':'пока тихо';
+}
+function prikolTabHTML(){
+  return `<div class="prikol-hero">
+      <div class="prikol-emoji">🎉</div>
+      <div style="min-width:0;flex:1">
+        <div class="pf-name" style="font-size:19px">приколяхи</div>
+        <div class="pf-sub">уютные штуки для своих. первая — комнаты, где все слушают один трек одновременно.</div>
+      </div>
+    </div>
+    <div class="pcard" style="padding:14px 16px;margin-top:12px">
+      <div class="shelf-head" style="justify-content:space-between">
+        <h3>🎧 комнаты прослушивания</h3>
+        <span class="from-line" id="prikolLive">${prikolLiveText()}</span>
+      </div>
+      <div class="prikol-rooms" id="prikolRooms">${prikolRoomsHTML()}</div>
+      <div class="prikol-create">
+        <input class="pill-input" id="prikolName" placeholder="название комнаты…" maxlength="32">
+        <button class="snd-playall" id="prikolMake" style="padding:9px 16px;font-size:12.5px">＋ создать</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="minibtn" id="prikolOpen">открыть все комнаты →</button>
+        <span class="from-line">внутри: чат, очередь треков и голосование за следующий</span>
+      </div>
+    </div>`;
+}
+function prikolOpenRoom(id){try{go('rooms');roomsOpen(id);}catch(e){}}
+function prikolRefresh(){
+  if(window.__PG!=='sound'||soundTab!=='prikol')return;
+  try{roomsPullAll(true).then(()=>{
+    if(window.__PG!=='sound'||soundTab!=='prikol')return;
+    const box=document.getElementById('prikolRooms');if(!box)return;
+    box.innerHTML=prikolRoomsHTML();
+    box.querySelectorAll('[data-proom]').forEach(b=>b.onclick=()=>prikolOpenRoom(b.dataset.proom));
+    const lv=document.getElementById('prikolLive');if(lv)lv.textContent=prikolLiveText();
+  }).catch(()=>{});}catch(e){}
+}
+function bindPrikolTab(host){
+  host.querySelectorAll('[data-proom]').forEach(b=>b.onclick=()=>prikolOpenRoom(b.dataset.proom));
+  const inp=host.querySelector('#prikolName');
+  const make=()=>{
+    const name=(inp&&inp.value.trim())||('комната '+((typeof prof==='function'&&(prof()||{}).dn)||me.user));
+    try{
+      go('rooms');
+      let rn=document.getElementById('roomName');
+      if(!rn){/* мы «внутри» комнаты — выходим в список, чтобы появилась форма */try{roomsLeave();}catch(e){}rn=document.getElementById('roomName');}
+      if(rn)rn.value=name;
+      roomsCreate();
+    }catch(e){}
+  };
+  const mk=host.querySelector('#prikolMake');
+  if(mk)mk.onclick=make;
+  if(inp)inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();make();}};
+  const op=host.querySelector('#prikolOpen');
+  if(op)op.onclick=()=>{try{go('rooms')}catch(e){}};
+  prikolRefresh();
+  /* пока сидим на приколяхах — тихо обновляем список комнат */
+  if(!window.__prikolTick){
+    window.__prikolTick=setInterval(()=>{try{prikolRefresh()}catch(e){}},8000);
+  }
+}
 function renderSound(){
   const box=document.getElementById('pg-sound');
   const trs=tracksAll();
@@ -5059,8 +5224,9 @@ function renderSound(){
         <span class="stabgroup">найти и добавить</span>
         <button class="stab ${soundTab==='sc'?'active':''}" data-st="sc">SoundCloud</button>
         <button class="stab ${soundTab==='sp'?'active':''}" data-st="sp">Spotify</button>
+        <button class="stab ${soundTab==='prikol'?'active':''}" data-st="prikol">🎉 приколяхи</button>
       </div>
-      ${['sc','sp','plview','pl','plall'].includes(soundTab)?'':`<div class="snd-search">
+      ${['sc','sp','prikol','plview','pl','plall'].includes(soundTab)?'':`<div class="snd-search">
         <input id="sndQ" placeholder="поиск по названию или исполнителю…" value="${esc(soundQuery)}">
         <select id="sndSort" title="сортировка">
           <option value="new"${soundSort==='new'?' selected':''}>сначала новые</option>
@@ -5114,6 +5280,9 @@ function renderSound(){
     playList=[];
     bodyEl.innerHTML=pubPl.length?pubPl.map(p=>plCardHTML(p)).join(''):'<div class="snd-empty">публичных плейлистов пока нет — создай свой во вкладке «плейлисты» и не ставь галочку «приватный», тогда он появится здесь у всех</div>';
     bindPlCards(bodyEl);
+  }else if(soundTab==='prikol'){
+    bodyEl.innerHTML=prikolTabHTML();
+    bindPrikolTab(bodyEl);
   }else if(['sc','sp'].includes(soundTab)){
     bodyEl.innerHTML=platformTabHTML(soundTab);
     bindPlatformTab(bodyEl,soundTab);
@@ -6390,6 +6559,12 @@ async function setCurrent(id){
 }
 function syncPlayerUI(){
   NP.play.innerHTML=player.playing?ICON_PAUSE:ICON_PLAY;
+  /* мини-плеер «сейчас слушает» на страницах профилей */
+  document.querySelectorAll('.listen-card').forEach(c=>{
+    const on=player.currentId===c.dataset.nowtrack&&player.playing;
+    const btn=c.querySelector('[data-listen-play]');if(btn)btn.textContent=on?'⏸':'▶';
+    const eq=c.querySelector('.listen-cover .eq3');if(eq)eq.classList.toggle('paused',!on);
+  });
   document.querySelectorAll('.tplay').forEach(b=>{
     const tr=b.closest('.track');const on=tr&&tr.dataset.t===player.currentId&&player.playing;
     b.innerHTML=on?ICON_PAUSE:'▶';b.classList.toggle('playing',on);
@@ -6398,7 +6573,120 @@ function syncPlayerUI(){
   const pfPlay=document.getElementById('pfTrackPlay');
   if(pfPlay&&cur)pfPlay.innerHTML=player.playing?ICON_PAUSE:ICON_PLAY;
   try{refreshPlaylistButtons()}catch(e){}
+  try{
+    if(player.playing&&!NP.panel.classList.contains('hidden'))npWaveStart();
+    else npWaveStop();
+  }catch(e){}
 }
+/* ---- волны-эквалайзер за мини-плеером: реагируют на реальный звук ---- */
+const NPW={cv:null,ctx:null,actx:null,analyser:null,data:null,raf:0,last:0};
+function npWaveInit(){
+  if(NPW.cv)return;
+  const cv=document.getElementById('npWaves');
+  if(!cv)return;
+  NPW.cv=cv;
+  try{NPW.ctx=cv.getContext('2d');}catch(e){}
+}
+function npWaveAudio(){
+  if(NPW.actx){
+    try{if(NPW.actx.state==='suspended')NPW.actx.resume();}catch(e){}
+    return;
+  }
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC)return;
+    const ac=new AC();
+    const src=ac.createMediaElementSource(player.audio);
+    let an=null;
+    try{
+      an=ac.createAnalyser();
+      an.fftSize=256;an.smoothingTimeConstant=.82;
+      src.connect(an);an.connect(ac.destination);
+    }catch(e){
+      /* если анализатор не поднялся — звук всё равно должен играть */
+      try{src.connect(ac.destination);}catch(e2){}
+      an=null;
+    }
+    NPW.actx=ac;NPW.analyser=an;NPW.data=an?new Uint8Array(an.frequencyBinCount):null;
+    try{ac.resume();}catch(e){}
+  }catch(e){NPW.actx=null;NPW.analyser=null;NPW.data=null;}
+}
+function npWaveDraw(stop){
+  const cv=NPW.cv,ctx=NPW.ctx;
+  if(!cv||!ctx)return;
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=cv.clientWidth||960,h=cv.clientHeight||66;
+  if(!w||!h)return;
+  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){
+    cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr);
+  }
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  const acc=(getComputedStyle(document.documentElement).getPropertyValue('--acc')||'').trim()||'#8b7cff';
+  let vals=null,max=0;
+  if(!stop&&NPW.analyser&&NPW.data){
+    try{NPW.analyser.getByteFrequencyData(NPW.data);vals=NPW.data;}catch(e){}
+    if(vals)for(let i=0;i<vals.length;i++)if(vals[i]>max)max=vals[i];
+    if(max<6)vals=null; /* тишина/нет доступа — рисуем мягкую волну */
+  }
+  const bars=56,gap=2,bw=Math.max(1,(w-gap*(bars-1))/bars);
+  const t=performance.now()/1000;
+  for(let i=0;i<bars;i++){
+    let v;
+    if(vals){
+      const idx=Math.min(vals.length-1,Math.floor(Math.pow(i/bars,.82)*vals.length*.72));
+      v=(vals[idx]||0)/255;
+    }else if(stop){
+      v=.015;
+    }else{
+      v=.16+.14*(Math.sin(t*2.1+i*.55)*.5+.5)+.08*(Math.sin(t*5.3+i*1.7)*.5+.5);
+    }
+    const bh=Math.max(2,v*h*.9);
+    const x=i*(bw+gap);
+    ctx.globalAlpha=.22+v*.62;
+    ctx.fillStyle=acc;
+    ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(x,h/2-bh/2,bw,bh,bw/2);
+    else ctx.rect(x,h/2-bh/2,bw,bh);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+function npWaveStart(){
+  npWaveInit();
+  if(!NPW.cv)return;
+  npWaveAudio();
+  if(NPW.raf)return;
+  NPW.last=0;
+  const step=(now)=>{
+    NPW.raf=requestAnimationFrame(step);
+    if(now-NPW.last<33)return;
+    NPW.last=now;
+    npWaveDraw(false);
+  };
+  NPW.raf=requestAnimationFrame(step);
+}
+function npWaveStop(){
+  if(NPW.raf){cancelAnimationFrame(NPW.raf);NPW.raf=0;}
+  npWaveDraw(true);
+}
+/* контекст звука заводим на первом же жесте — тогда автоплей не глушит волны */
+try{
+  const nwwarm=()=>{
+    try{npWaveAudio();}catch(e){}
+    document.removeEventListener('pointerdown',nwwarm,true);
+    document.removeEventListener('keydown',nwwarm,true);
+  };
+  document.addEventListener('pointerdown',nwwarm,true);
+  document.addEventListener('keydown',nwwarm,true);
+}catch(e){}
+/* вернулись на вкладку — будим звук и волны, если музыка играет */
+try{
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden)return;
+    try{if(player.playing&&NPW.actx){NPW.actx.resume();npWaveStart();}}catch(e){}
+  });
+}catch(e){}
 function startTrack(id){setCurrent(id);}
 function nextTrack(){
   if(!player.queue.length)return;
@@ -7133,11 +7421,11 @@ function renderSettings(){
   const accs=encLoad(LS.acc,{});
   const th=document.documentElement.dataset.theme;
   box.innerHTML=`<div class="pcard" style="padding:6px 18px 18px">
-    <h3 id="st-prof" style="padding:12px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">профиль</h3>
+    <h3 id="st-prof" style="padding:12px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">👤 профиль</h3>
     <div class="frow" style="cursor:default"><div class="ava">✏</div><div class="fmid"><div class="fname">имя и статус</div><div class="fsub">${esc(pr.dn||me.user)} — ${esc(pr.status||'без статуса')}</div></div><button class="minibtn" id="sEd">изменить</button></div>
     <div class="frow" style="cursor:default"><div class="ava">🎨</div><div class="fmid"><div class="fname">аватарка и оформление</div><div class="fsub">смайлик, фото, gif, живой фон</div></div><button class="minibtn" id="sEd2">настроить</button></div>
 
-    <h3 id="st-acc" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">аккаунт</h3>
+    <h3 id="st-acc" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">🔑 аккаунт</h3>
     <div class="frow" style="cursor:default"><div class="ava">🔑</div><div class="fmid"><div class="fname">сменить пароль</div><div class="fsub">${Object.keys(accs).includes(me.user)?'аккаунт «'+esc(me.user)+'» · '+esc(accs[me.user].createdAt||''):'гость — сначала зарегистрируйся'}</div></div><button class="minibtn" id="sPass">сменить</button></div>
     <div style="display:none;background:var(--card2);border-radius:10px;padding:12px;margin-top:6px" id="passBox">
       <input class="pill-input" id="passOld" type="password" placeholder="текущий пароль" style="margin-bottom:8px">
@@ -7146,7 +7434,7 @@ function renderSettings(){
     </div>
     <div class="frow" style="cursor:default"><div class="ava">🔒</div><div class="fmid"><div class="fname">пароль хранится навсегда</div><div class="fsub">никто не видит чужие пароли — ни админ, ни кто-либо ещё</div></div></div>
 
-    <h3 id="st-priv" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">приватность</h3>
+    <h3 id="st-priv" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">🔒 приватность</h3>
     ${['profile','messages','comments'].map(k=>`<div class="frow" style="cursor:default">
       <div class="ava">${k==='profile'?'👤':k==='messages'?'💬':'📝'}</div>
       <div class="fmid"><div class="fname">${k==='profile'?'мою страницу видят':k==='messages'?'мне пишут':'комментируют'}</div><div class="fsub">кто имеет доступ</div></div>
@@ -7154,22 +7442,36 @@ function renderSettings(){
     </div>`).join('')}
     <div class="frow" style="cursor:default"><div class="ava">🙈</div><div class="fmid"><div class="fname">скрытый аккаунт</div><div class="fsub">никто не видит твою страницу — только ты и админ</div></div><div class="sw ${pr.hiddenAcc?'on':''}" id="sHid"><i></i></div></div>
 
-    <h3 id="st-sects" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">моя страница — что показывать</h3>
+    <h3 id="st-sects" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">📄 моя страница — что показывать</h3>
     ${Object.entries(SECT_LABELS).map(([k,n])=>`<div class="frow" style="cursor:default">
       <div class="ava">📄</div><div class="fmid"><div class="fname">${n}</div><div class="fsub">раздел страницы</div></div>
       <div class="sw ${sectOn(pr,k)?'on':''}" data-sk="${k}"><i></i></div>
     </div>`).join('')}
+    <div class="frow" style="cursor:default"><div class="ava">🪙</div><div class="fmid"><div class="fname">табличка с оонетками</div><div class="fsub">показывать баланс под витриной подарков</div></div><div class="sw ${pr.shelfCoins!==false?'on':''}" data-ux="shelfCoins"><i></i></div></div>
 
-    <h3 id="st-notif" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">уведомления</h3>
+    <h3 id="st-notif" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">🔔 уведомления</h3>
     ${[['likes','лайки на записях','❤'],['msgs','сообщения и бот','💬'],['music','новые треки и релизы','🎵'],['sound','звуки интерфейса','🔊'],['push','push-уведомления браузера','🔔']].map(([k,n,ic])=>`<div class="frow" style="cursor:default">
       <div class="ava">${ic}</div><div class="fmid"><div class="fname">${n}</div><div class="fsub">${k==='push'?'прилетят, когда сайт свёрнут':'что доставлять'}</div></div>
       <div class="sw ${nprefs[k]?'on':''}" data-nk="${k}"><i></i></div>
     </div>`).join('')}
 
-    <h3 id="st-view" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">внешний вид</h3>
+    <h3 id="st-view" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">🎨 внешний вид</h3>
     <div class="frow" style="cursor:default"><div class="ava">${th==='dark'?'🌙':'🌞'}</div><div class="fmid"><div class="fname">тема</div><div class="fsub">${th==='dark'?'тёмная — вечерняя':'светлая — дневная'}</div></div><button class="minibtn" id="sTheme">${th==='dark'?'в светлую':'в тёмную'}</button></div>
-    <div class="frow" style="cursor:default"><div class="ava">✨</div><div class="fmid"><div class="fname">акцентный цвет сайта</div></div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">${ACCENTS.map(c=>`<div class="swatch ${load(LS.accent,'#8b7cff')===c?'on':''}" style="background:${c}" data-c="${c}" title="${c}"></div>`).join('')}</div>
+    <div class="frow" style="cursor:default;align-items:flex-start"><div class="ava">🖤</div>
+      <div class="fmid"><div class="fname">нефор-темы</div><div class="fsub">нуар, VHS, кислота, кровь, грязь и другие настроения. включаются в тёмной теме</div></div></div>
+    <div class="skin-grid">${SKINS.map(s=>`<div class="skin-sw ${(load(LS.skin,'')||'')===s.id?'on':''} ${s.id?'skin-'+s.id:'skin-normal'}" data-skinpick="${s.id}" title="${esc(s.n)}"><i></i><span>${s.id?esc(s.n):'обычная'}</span></div>`).join('')}</div>
+    <div class="frow" style="cursor:default"><div class="ava">📲</div><div class="fmid"><div class="fname">приложение на телефон</div><div class="fsub">иконка на главном экране, открывается без браузера</div></div><button class="minibtn" id="sPwa">установить</button></div>
+    <div id="pwaHelp" style="display:none;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;margin:4px 0 10px;font-size:12px;line-height:1.65;color:var(--muted)">
+      <b style="color:var(--text)">как поставить oomy на телефон</b><br>
+      📱 <b>iPhone / iPad:</b> открой сайт в Safari → кнопка «Поделиться» (квадрат со стрелкой) → «На экран Домой» → добавить.<br>
+      🤖 <b>Android:</b> открой сайт в Chrome → меню ⋮ → «Установить приложение» (или «Добавить на главный экран»).<br>
+      💻 <b>ПК:</b> в Chrome/Edge нажми значок установки справа в адресной строке.<br>
+      <span style="color:var(--muted2)">сайт на GitHub Pages работает по https — иконка и оффлайн-оболочка включаются сами. музыка, чаты и комнаты синхронизируются между телефоном и ПК в реальном времени через общий мир.</span>
+    </div>
+    <div class="frow" style="cursor:default"><div class="ava">✨</div><div class="fmid"><div class="fname">акцентный цвет сайта</div><div class="fsub">свотчи или любой свой цвет</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${ACCENTS.map(c=>`<div class="swatch ${load(LS.accent,'#8b7cff')===c?'on':''}" style="background:${c}" data-c="${c}" title="${c}"></div>`).join('')}
+        <label class="accent-pick" title="свой цвет"><input type="color" id="sAccentPick" value="${esc(/^#[0-9a-f]{6}$/i.test(load(LS.accent,'#8b7cff'))?load(LS.accent,'#8b7cff'):'#8b7cff')}"><span>🎨</span></label>
+      </div>
     </div>
     <div class="frow" style="cursor:default"><div class="ava">🖼</div><div class="fmid"><div class="fname">фон сайта и шапка профиля</div><div class="fsub">фото, gif или видео до 10МБ</div></div><button class="minibtn" id="sBg">настроить</button></div>
     <div class="frow" style="cursor:default"><div class="ava">🫧</div><div class="fmid"><div class="fname">прозрачность баров</div><div class="fsub">верхняя панель и меню сайта</div></div>
@@ -7186,16 +7488,16 @@ function renderSettings(){
       </select></div>
     <div class="frow" style="cursor:default"><div class="ava">❄</div><div class="fmid"><div class="fname">снежинки</div><div class="fsub">зимнее настроение на всём сайте</div></div><div class="sw ${snowOn?'on':''}" id="sSnow"><i></i></div></div>
 
-    <h3 id="st-audio" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">аудио</h3>
+    <h3 id="st-audio" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">🎧 аудио</h3>
     <div class="frow" style="cursor:default"><div class="ava">🔊</div><div class="fmid"><div class="fname">громкость по умолчанию</div><div class="fsub">${Math.round(player.audio.volume*100)}%</div></div><input type="range" min="0" max="100" value="${Math.round(player.audio.volume*100)}" id="sVol" style="width:130px"></div>
     <div class="frow" style="cursor:default"><div class="ava">🎯</div><div class="fmid"><div class="fname">автовоспроизведение следующего</div></div><div class="sw on" id="sAuto"><i></i></div></div>
 
-    <h3 id="st-ux" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">удобство</h3>
+    <h3 id="st-ux" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">⚙️ удобство</h3>
     <div class="frow" style="cursor:default"><div class="ava">🖱</div><div class="fmid"><div class="fname">двойной клик = лайк</div><div class="fsub">как в привычных соцсетях</div></div><div class="sw ${pr.dblLike!==false?'on':''}" data-ux="dblLike"><i></i></div></div>
     <div class="frow" style="cursor:default"><div class="ava">⌨</div><div class="fmid"><div class="fname">горячие клавиши плеера</div><div class="fsub">пробел — плей/пауза, ←/→ — ±5 сек</div></div><div class="sw ${pr.hotkeys!==false?'on':''}" data-ux="hotkeys"><i></i></div></div>
     <div class="frow" style="cursor:default"><div class="ava">⬆</div><div class="fmid"><div class="fname">кнопка «наверх»</div><div class="fsub">появляется при прокрутке</div></div><div class="sw ${pr.toTop!==false?'on':''}" data-ux="toTop"><i></i></div></div>
 
-    <h3 id="st-about" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">о сайте</h3>
+    <h3 id="st-about" style="padding:16px 2px 6px;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.7px">🐱 о сайте</h3>
     <div class="frow" style="cursor:default"><div class="ava">🐱</div><div class="fmid"><div class="fname">oomy</div><div class="fsub">соцсеть толстых котиков · логи ведутся всегда и зашифрованы · oomy © 2026</div></div></div>
   </div>`;
   document.getElementById('sEd').onclick=openEditor;
@@ -7262,11 +7564,46 @@ function renderSettings(){
     done();
   });
   document.getElementById('sTheme').onclick=()=>{themeBtn.click();setTimeout(renderSettings,60);};
+  /* нефор-скины: клик по образцу включает настроение оформления */
+  box.querySelectorAll('[data-skinpick]').forEach(s=>s.onclick=()=>{
+    const id=s.dataset.skinpick||'';
+    if(id&&document.documentElement.dataset.theme!=='dark')applyTheme('dark',true);
+    applySkin(id);
+    box.querySelectorAll('[data-skinpick]').forEach(x=>x.classList.toggle('on',(x.dataset.skinpick||'')===id));
+    try{applyPageBg();}catch(e){}
+    addLog('settings',me.user,'нефор-тема: '+(id||'обычная'));
+    toast(id?('тема «'+((SKINS.find(z=>z.id===id)||{}).n||id)+'» включена 🖤'):'вернул обычное оформление');
+  });
+  /* установка приложения: если браузер дал событие — ставим сразу, иначе показываем инструкцию */
+  const pwaBtn=document.getElementById('sPwa');
+  if(pwaBtn)pwaBtn.onclick=()=>{
+    const help=document.getElementById('pwaHelp');
+    if(window.__pwaPrompt){
+      try{window.__pwaPrompt.prompt();}catch(e){}
+      const pr=window.__pwaPrompt;
+      window.__pwaPrompt=null;
+      if(pr&&pr.userChoice)pr.userChoice.then(()=>{if(help)help.style.display='block';}).catch(()=>{});
+      return;
+    }
+    if(help)help.style.display=help.style.display==='none'?'block':'none';
+    if(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)toast('oomy уже открыт как приложение 📲');
+    else toast('выбери браузер и добавь oomy на главный экран — инструкция ниже');
+  };
   box.querySelectorAll('[data-c]').forEach(s=>s.onclick=()=>{
     applyAccent(s.dataset.c);
     box.querySelectorAll('[data-c]').forEach(x=>x.classList.remove('on'));s.classList.add('on');
+    const ap=document.getElementById('sAccentPick');if(ap)ap.value=s.dataset.c;
     addLog('settings',me.user,'акцент '+s.dataset.c);toast('цвет изменён ✨');
   });
+  const accentPick=document.getElementById('sAccentPick');
+  if(accentPick){
+    accentPick.oninput=()=>{try{applyAccent(accentPick.value,false);}catch(e){}};
+    accentPick.onchange=()=>{
+      try{applyAccent(accentPick.value,true);}catch(e){}
+      box.querySelectorAll('[data-c]').forEach(x=>x.classList.remove('on'));
+      addLog('settings',me.user,'акцент '+accentPick.value);toast('цвет изменён ✨');
+    };
+  }
   const sb=document.getElementById('sBar');
   if(sb)sb.onchange=()=>{const p=prof();p.barStyle=sb.value;saveProf(p);applyBarStyle();addLog('settings',me.user,'стиль баров: '+sb.value);toast('бары: '+({default:'обычный',translucent:'полупрозрачный',transparent:'прозрачный'})[sb.value]);};
   const sv=document.getElementById('sView');
@@ -7361,6 +7698,15 @@ function renderAdmin(){
         <button class="minibtn" id="aLogs">🗂 логи</button>
       </div>
     </div>
+    <div class="adm-group">
+      <div class="adm-group-h">⚡ быстрые</div>
+      <div class="adm-tools">
+        <button class="minibtn" id="aFind">🔎 найти котика</button>
+        <button class="minibtn" id="aTop">🏆 топ по оонеткам</button>
+        <button class="minibtn" id="aWho">👀 кто онлайн</button>
+        <button class="minibtn" id="aInvite">🔗 ссылка-приглашение</button>
+      </div>
+    </div>
     <div class="adm-box" id="admBody"><div class="adm-note">выбери инструмент выше — он откроется здесь. все действия пишутся в зашифрованный лог.</div></div>
   </div>`;
   const body=box.querySelector('#admBody');
@@ -7400,6 +7746,33 @@ function renderAdmin(){
       const w=wallet();w[u]=(w[u]||0)+n;save(LS.wallet,w);pushNotif(u,'🎁','@'+ADMIN+' выдал тебе '+n+' оонеток',{av:ADMIN});
       addLog('admin',me.user,'выдал '+n+' оонеток '+u);refreshOonChip();toast('@'+u+' +'+n);refresh();
     });
+  };
+  box.querySelector('#aFind').onclick=()=>{
+    askForm('🔎 найти котика',[{ph:'юзернейм или имя'}],q=>{
+      q=(q||'').trim().replace(/^@/,'');if(!q)return false;
+      const list=Object.keys(accs);
+      const hit=list.find(u=>u.toLowerCase()===q.toLowerCase())||list.find(u=>String(profOf(u).dn||'').toLowerCase().includes(q.toLowerCase()));
+      if(!hit){toast('такого котика нет');return false;}
+      goUser(hit);
+      toast('открываю @'+hit);
+    });
+  };
+  box.querySelector('#aTop').onclick=()=>{
+    const w=wallet();
+    const rows=Object.keys(accs).map(u=>[u,Number(w[u])||0]).sort((a,b)=>b[1]-a[1]).slice(0,15);
+    const max=rows.length&&rows[0][1]>0?rows[0][1]:1;
+    set('<div class="adm-note">🏆 топ котиков по оонеткам</div>'+rows.map(([u,n],i)=>`<div class="adm-row"><b style="min-width:22px">${i+1}</b>${userLink(u)}<span class="from-line" style="flex:1;text-align:right">${n} 🪙</span><span style="width:90px;height:6px;border-radius:4px;background:var(--line);overflow:hidden;flex:none"><i style="display:block;height:100%;width:${Math.max(4,Math.round(n/max*100))}%;background:var(--acc)"></i></span></div>`).join('')||'<div class="adm-note">пока ни у кого нет оонеток</div>');
+  };
+  box.querySelector('#aWho').onclick=()=>{
+    const list=Object.keys(accs);
+    const on=list.filter(u=>{try{return isOnline(u)}catch(e){return false}});
+    set('<div class="adm-note">👀 сейчас на сайте: '+on.length+' из '+list.length+'</div>'+(on.length?on.map(u=>`<div class="adm-row">${userLink(u)}<span class="from-line">${esc(profOf(u).dn||u)}</span></div>`).join(''):'<div class="adm-note">никого — тишина и уют</div>'));
+  };
+  box.querySelector('#aInvite').onclick=()=>{
+    const u=cloudRoot();
+    if(!u){toast('сначала подключи общий мир (☁ общий мир)');return;}
+    copyText(location.href.split('#')[0]+'#cloud='+btoa(u));
+    toast('ссылка-приглашение скопирована 🔗');
   };
   box.querySelector('#aKeys').onclick=()=>{
     const ks=load(LS.keys,{});
@@ -7686,6 +8059,7 @@ function enterFeed(){
     const up=prof();
     applyTheme(up.theme||'dark',false);
     applyAccent(up.siteAccent||'#e11d48',false);
+    try{applySkin(up.skin||load(LS.skin,''),false);}catch(e){}
   }
   touchSeen();
   refreshChips();refreshOonChip();refreshAdminNav();applyPageBg();applyBarStyle();
@@ -7974,6 +8348,13 @@ function applyPublicWorld(){
   unionUsers(LS.gifts,'gid');
   unionUsers(LS.friends,null);
   unionUsers(LS.badgeOwn,null);
+  /* кошельки: последнее число всегда главнее снимка мира. снимок только
+     добавляет тех, кого на этом устройстве ещё нет, — баланс не откатывается
+     к старому значению при каждом обновлении сайта */
+  const localWallet=load(LS.wallet,{})||{};
+  const snapWallet=D[LS.wallet]||{};
+  Object.keys(snapWallet).forEach(u=>{if(localWallet[u]===undefined)localWallet[u]=snapWallet[u];});
+  save(LS.wallet,localWallet);
   /* сейчас играет — только свежее */
   const nowMap=load(LS.now,{})||{};
   Object.keys(D[LS.now]||{}).forEach(u=>{nowMap[u]=D[LS.now][u];});
@@ -8216,6 +8597,21 @@ function ensureAccounts(){
      пароли никто не перетирает — человек всегда входит так, как регался,
      и пароль меняется только им самим (настройки → сменить пароль) */
 }
+/* ============ PWA: иконка на телефон, оффлайн-оболочка ============ */
+window.__pwaPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();window.__pwaPrompt=e;});
+window.addEventListener('appinstalled',()=>{try{toast('oomy теперь как приложение — ищи иконку на главном экране 📲');}catch(e){}});
+(function pwaBoot(){
+  /* service worker только на https или localhost: на file:// он не нужен и не работает */
+  try{
+    const okLoc=/^https:$/.test(location.protocol)||/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+    if(okLoc&&'serviceWorker' in navigator){
+      window.addEventListener('load',()=>{
+        navigator.serviceWorker.register('sw.js',{scope:'./'}).catch(()=>{});
+      });
+    }
+  }catch(e){}
+})();
 (async function boot(){
   try{killAutofill();}catch(e){}
   try{ensureAccounts();}catch(e){}
