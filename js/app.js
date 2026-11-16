@@ -2618,7 +2618,9 @@ function railWallet(rail){
 }
 
 /* ---- МАГАЗИН ---- */
-const RAR_LIMIT={common:5,rare:3,pizdets:2,ebat:1,ahuy:1};
+/* сколько копий одного подарка котик может купить за час — по редкости:
+   чем реже подарок, тем меньше копий в час, чтобы один кот не скупил весь тираж */
+const RAR_LIMIT={common:10,rare:5,pizdets:3,ebat:2,ahuy:1};
 function buyHistFor(u,gid){
   const h=load(LS.buyHist,{});
   const arr=(h[u]&&h[u][gid])||[];
@@ -2642,7 +2644,7 @@ function tbShop(body,rail){
       <div class="gn" data-ginfo="${g.id}" style="cursor:pointer">${esc(g.name)}</div>
       <div class="rar-badge rar-${rar}">${RARITY[rar]}</div>
       <div class="gp">${g.price} оонеток · ${dead?'тираж закончился':soldOf(g.id)+'/'+g.tiraj}</div>
-      <div class="from-line" style="font-size:10.5px">лимит в час: ${used}/${cap}</div>
+      ${dead?'':'<div class="from-line" style="font-size:10.5px">лимит в час: '+used+'/'+cap+'</div>'}
       ${dead
         ?`<button class="minibtn" disabled style="margin-top:5px;opacity:.5;cursor:not-allowed">закончились</button>`
         :`<button class="minibtn" data-buy="${g.id}" style="margin-top:5px">купить · ${g.price}</button>`}
