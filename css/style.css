@@ -169,6 +169,10 @@ input:focus{border-color:var(--muted);box-shadow:0 0 0 3px rgba(120,130,160,.12)
 input[type=range]{accent-color:var(--acc);cursor:pointer}
 .np-vol{width:90px;flex:none}
 .np-toggle.on{color:var(--acc)}
+/* волны-эквалайзер за мини-плеером */
+.np-waves{position:absolute;left:0;right:0;bottom:0;top:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:.85}
+.nowpanel .np-btns,.nowpanel .np-body,.nowpanel .np-add-wrap{position:relative;z-index:1}
+.nowpanel #npAdd,.nowpanel #npMute,.nowpanel #npVol,.nowpanel #npShuffle,.nowpanel #npRepeat,.nowpanel #npExt{position:relative;z-index:1}
 
 /* лента */
 .feed-shell{width:100%;max-width:1280px;padding:20px 22px 90px;gap:22px;display:grid;grid-template-columns:230px minmax(0,1fr);justify-content:center;align-items:start;pointer-events:auto}
@@ -211,9 +215,11 @@ input[type=range]{accent-color:var(--acc);cursor:pointer}
 .repost-tag b{cursor:pointer}
 .repost-tag b:hover{text-decoration:underline}
 .att{max-width:100%;border-radius:12px;margin:10px 16px;display:block;max-height:400px;overflow:hidden}
-.att img{max-width:100%;max-height:400px;object-fit:cover;border-radius:12px;cursor:zoom-in;display:block;border:1px solid var(--line);box-sizing:border-box}
-.att video{max-width:100%;max-height:400px;border-radius:12px;display:block;background:#000;border:1px solid var(--line);box-sizing:border-box}
-.att audio{width:100%}
+.att img{max-width:100%;max-height:400px;object-fit:cover;border-radius:12px;cursor:zoom-in;display:block;border:1px solid var(--line);box-sizing:border-box;transition:border-color .2s,box-shadow .2s}
+.att img:hover{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc),0 6px 22px var(--shadow)}
+.att video{max-width:100%;max-height:400px;border-radius:12px;display:block;background:#000;border:1px solid var(--line);box-sizing:border-box;transition:border-color .2s}
+.att video:hover{border-color:var(--acc)}
+.att audio{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:4px 6px;box-sizing:border-box;accent-color:var(--acc)}
 .att .file{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:13px;cursor:pointer;transition:transform .15s,border-color .15s;pointer-events:auto;color:var(--text);text-decoration:none}
 .att .file:hover{transform:scale(1.01);border-color:var(--acc)}
 .pinflag{position:absolute;top:-9px;left:14px;background:var(--acc);color:#fff;font-size:10px;font-weight:700;padding:2px 10px;border-radius:10px;letter-spacing:.5px}
@@ -540,10 +546,17 @@ i,em{font-style:normal}
 .gift-card .gi{font-size:30px}
 .gift-card .gn{font-size:12px;font-weight:700;margin-top:4px}
 .gift-card .gp{font-size:11px;color:var(--acc);font-weight:700;margin-top:2px}
-.pf-gifts{display:flex;gap:6px;flex-wrap:wrap}
-.pf-gifts>span{font-size:22px;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:5px 9px;cursor:pointer}
-.pf-gifts img{width:38px;height:38px;object-fit:cover;border-radius:9px;background:var(--card2);cursor:pointer}
-.pf-gifts .empty-shelf{font-size:12px;color:var(--muted2);background:none;border:none;padding:2px}
+/* полка профиля: ровно 10 подарочков в одну полосу, крупно и вровень */
+.pf-gifts{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:10px;align-items:start;padding:2px 0}
+.pf-gift{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;min-width:0}
+.pf-gift .gwrap{display:flex;align-items:center;justify-content:center;width:100%}
+.pf-gift img,.pf-gift .gwrap>span{width:100%!important;height:auto!important;aspect-ratio:1/1;object-fit:cover;border-radius:12px;background:var(--card2)}
+.pf-gift .rar-badge{font-size:8.5px;padding:1px 5px;line-height:1.25;margin-top:-1px}
+.pf-gift-name{font-size:10.5px;font-weight:700;line-height:1.15;max-width:100%;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pf-gifts img{cursor:pointer}
+.pf-gifts .empty-shelf{grid-column:1/-1;font-size:12px;color:var(--muted2);padding:2px}
+@media (max-width:860px){.pf-gifts{grid-template-columns:repeat(5,minmax(0,1fr))}}
+html[data-view=mobile] .pf-gifts{grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
 
 /* редкость подарков */
 .gwrap{display:inline-flex;align-items:center;justify-content:center;border-radius:11px;padding:2px;border:2px solid var(--line);vertical-align:middle}
@@ -701,6 +714,10 @@ html{scrollbar-gutter:stable}
 .pill-input,.inp-line{border-radius:12px}
 .swatch{width:28px;height:28px;box-shadow:0 0 0 1px rgba(255,255,255,.14) inset}
 .swatch.on{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--text)}
+.accent-pick{position:relative;width:28px;height:28px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;background:var(--card2);border:1px solid var(--line);font-size:14px;overflow:hidden;transition:transform .15s,border-color .2s;pointer-events:auto}
+.accent-pick:hover{transform:scale(1.12);border-color:var(--acc)}
+.accent-pick input{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:none;padding:0;cursor:pointer}
+.accent-pick span{pointer-events:none}
 
 /* нижний плеер: компактный, только когда есть трек */
 .nowpanel{left:50%;right:auto;bottom:16px;transform:translateX(-50%);width:min(760px,calc(100% - 26px));height:60px;padding:0 14px;gap:6px;border:1px solid var(--line);border-radius:20px;background:color-mix(in srgb,var(--card) 94%,transparent);backdrop-filter:blur(18px);box-shadow:0 18px 50px rgba(0,0,0,.42)}
@@ -1447,3 +1464,226 @@ html[data-view=mobile] .tt-stage{height:62vh;min-height:320px;max-height:520px}
 html[data-view=mobile] .story-view .st-box{max-width:100vw}
 html[data-view=mobile] .dlg-more{opacity:.75}
 html[data-view=mobile] .adm-tools .minibtn{flex:1 1 45%}
+/* ================= ВИТРИНА ПОДАРКОВ + ЗНАЧКИ (2026) ================= */
+.shelf-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.shelf-head h3{margin:0!important}
+.shelf-oon-row{display:flex;justify-content:flex-start;margin-top:10px}
+.shelf-oon{font-size:11.5px;padding:3px 10px;box-shadow:0 2px 8px var(--shadow);transition:transform .15s,border-color .2s}
+.shelf-oon b{font-size:12px;font-weight:800}
+.shelf-oon:hover{transform:translateY(-1px);border-color:var(--acc)}
+/* приколяхи внутри oomy music */
+.prikol-hero{display:flex;align-items:center;gap:14px;padding:18px 20px;border:1px solid color-mix(in srgb,var(--acc) 30%,var(--line));border-radius:16px;background:linear-gradient(115deg,color-mix(in srgb,var(--acc) 16%,var(--card2)),var(--card2) 62%)}
+.prikol-emoji{font-size:34px;line-height:1;flex:none;filter:drop-shadow(0 4px 12px color-mix(in srgb,var(--acc) 60%,transparent))}
+.prikol-rooms{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.prikol-room{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--text);cursor:pointer;font-family:inherit;transition:transform .15s,border-color .2s,box-shadow .2s}
+.prikol-room:hover{transform:translateY(-1px);border-color:var(--acc);box-shadow:0 8px 22px -16px var(--acc)}
+.prikol-room-ico{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;background:color-mix(in srgb,var(--acc) 16%,var(--card));border:1px solid color-mix(in srgb,var(--acc) 28%,var(--line));flex:none}
+.prikol-room-mid{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.prikol-room-mid b{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prikol-room-mid span{font-size:11px;color:var(--muted2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prikol-go{font-size:11.5px;font-weight:800;color:var(--acc);flex:none}
+.prikol-create{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+.prikol-create .pill-input{flex:1;min-width:150px;width:auto}
+.shelf-count{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:19px;padding:0 7px;margin-left:6px;border-radius:999px;background:color-mix(in srgb,var(--acc) 18%,var(--card2));border:1px solid color-mix(in srgb,var(--acc) 40%,var(--line));color:var(--text);font-size:10.5px;font-weight:800;letter-spacing:0;vertical-align:middle}
+.shelf-links{margin-left:auto;display:flex;gap:14px;align-items:center}
+.shelf-links .link{font-size:11.5px;color:var(--muted);cursor:pointer;transition:color .15s}
+.shelf-links .link:hover{color:var(--acc)}
+.pf-gift{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;min-width:0;padding:3px 2px 2px;border-radius:14px;transition:transform .18s ease}
+.pf-gift::before{content:'';position:absolute;inset:-2px;border-radius:16px;background:radial-gradient(circle at 50% 38%,color-mix(in srgb,var(--acc) 62%,transparent),transparent 68%);opacity:0;filter:blur(5px);transition:opacity .2s;z-index:0;pointer-events:none}
+.pf-gift:hover{transform:translateY(-2px)}
+.pf-gift:hover::before{opacity:.95}
+.pf-gift .gwrap{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;width:100%;background:var(--card2)}
+.pf-gift img{position:relative;z-index:1}
+.pf-gift-num{font-size:10px;font-weight:800;letter-spacing:.2px;color:var(--muted);line-height:1.1;max-width:100%;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pf-gift:hover .pf-gift-num{color:var(--text)}
+.pf-gift[data-tip]:hover::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 7px);transform:translateX(-50%);z-index:30;padding:6px 10px;border-radius:9px;background:var(--btn);color:var(--text);font-size:11px;font-weight:600;line-height:1.25;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;border:1px solid color-mix(in srgb,var(--acc) 45%,var(--line));box-shadow:0 10px 26px var(--shadow);pointer-events:none}
+.pf-gifts{grid-template-columns:repeat(10,minmax(0,1fr));gap:8px}
+/* значки под витриной: картинка и название поочерёдно, с мягким переливом */
+.badge-strip{display:flex;gap:8px;flex-wrap:wrap;padding:2px 0 4px}
+.bdg-flip{position:relative;display:flex;align-items:center;justify-content:center;height:30px;min-width:74px;max-width:190px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:var(--card2);overflow:hidden;cursor:default;transition:border-color .2s,box-shadow .2s}
+.bdg-flip:hover{border-color:color-mix(in srgb,var(--acc) 55%,var(--line));box-shadow:0 0 16px -6px var(--acc)}
+.bdg-flip .bf-ico,.bdg-flip .bf-name{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 9px;transition:opacity .35s,transform .35s;animation:bfCycle 8s ease-in-out infinite;animation-delay:calc(var(--i,0)*-.6s)}
+.bdg-flip .bf-name{opacity:0;transform:translateY(8px);font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.bdg-flip .bf-ico .badge-chip.big{width:22px;height:22px;font-size:12px}
+.bdg-flip .bf-ico .badge-chip.big img,.bdg-flip .bf-ico .badge-chip.big video{width:100%;height:100%}
+.bdg-flip:hover .bf-ico,.bdg-flip:hover .bf-name{animation-play-state:paused}
+@keyframes bfCycle{
+  0%,42%{opacity:1;transform:translateY(0)}
+  50%,92%{opacity:0;transform:translateY(-7px)}
+  100%{opacity:1;transform:translateY(0)}
+}
+.bdg-flip .bf-name{animation-name:bfCycleName}
+@keyframes bfCycleName{
+  0%,42%{opacity:0;transform:translateY(7px)}
+  50%,92%{opacity:1;transform:translateY(0)}
+  100%{opacity:0;transform:translateY(7px)}
+}
+
+/* ================= «СЕЙЧАС СЛУШАЕТ» ================= */
+.listen-card{position:relative;display:flex;align-items:center;gap:11px;margin-top:10px;padding:9px 12px 9px 9px;max-width:520px;border-radius:16px;overflow:hidden;cursor:pointer;border:1px solid color-mix(in srgb,var(--acc) 34%,var(--line));background:linear-gradient(115deg,color-mix(in srgb,var(--acc) 20%,var(--card2)) 0%,var(--card2) 58%,var(--card2) 100%);box-shadow:0 0 0 1px color-mix(in srgb,var(--acc) 12%,transparent),0 14px 34px -26px var(--acc);transition:transform .18s ease,border-color .2s,box-shadow .2s;pointer-events:auto}
+.listen-card::before{content:'';position:absolute;inset:-55% -12% auto;height:200%;background:radial-gradient(ellipse at 18% 10%,color-mix(in srgb,var(--acc) 40%,transparent),transparent 58%);opacity:.55;pointer-events:none}
+.listen-card:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--acc) 62%,var(--line));box-shadow:0 0 26px -10px var(--acc),0 16px 36px -28px var(--acc)}
+.listen-cover{position:relative;width:48px;height:48px;border-radius:12px;overflow:hidden;flex:none;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 0 0 1px color-mix(in srgb,var(--acc) 45%,var(--line)),0 6px 18px -10px var(--acc);z-index:1}
+.listen-cover img{width:100%;height:100%;object-fit:cover}
+.listen-cover .eq3{position:absolute;left:0;right:0;bottom:0;height:15px;display:flex;align-items:flex-end;justify-content:center;gap:2px;padding:2px 0 3px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.55))}
+.listen-mid{position:relative;z-index:1;min-width:0;flex:1}
+.listen-label{display:inline-flex;align-items:center;gap:6px;font-size:9.5px;font-weight:800;letter-spacing:.9px;text-transform:uppercase;color:color-mix(in srgb,var(--acc) 78%,#fff)}
+.listen-name{font-size:13.5px;font-weight:800;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.listen-artist{font-size:11px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.listen-btn{position:relative;z-index:1;width:34px;height:34px;border-radius:50%;border:none;background:var(--acc);color:var(--acc-fg,#fff);font-size:13px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;box-shadow:0 4px 14px -6px var(--acc);transition:transform .15s,filter .2s}
+.listen-btn:hover{transform:scale(1.07);filter:brightness(1.08)}
+.eq3 i{width:3px;background:color-mix(in srgb,var(--acc) 80%,#fff);border-radius:2px;height:4px;animation:eq 0.9s ease-in-out infinite;box-shadow:0 0 6px color-mix(in srgb,var(--acc) 70%,transparent)}
+.eq3 i:nth-child(2){animation-delay:.18s}.eq3 i:nth-child(3){animation-delay:.36s}.eq3 i:nth-child(4){animation-delay:.54s}
+.eq3.paused i{animation-play-state:paused;height:4px!important}
+
+/* ================= КОМНАТЫ ПРОСЛУШИВАНИЯ ================= */
+.rooms-hero{position:relative;margin:12px;padding:20px 20px 18px;border-radius:18px;overflow:hidden;border:1px solid color-mix(in srgb,var(--acc) 30%,var(--line));background:radial-gradient(120% 160% at 8% 0%,color-mix(in srgb,var(--acc) 30%,transparent) 0%,transparent 52%),linear-gradient(120deg,var(--card2),var(--card))}
+.rooms-hero h2{margin:0;font-size:24px;letter-spacing:-.4px}
+.rooms-hero p{margin:6px 0 0;color:var(--muted);font-size:12.5px;max-width:560px;line-height:1.5}
+.rooms-hero .eq3{display:inline-flex;align-items:flex-end;gap:2px;height:14px;margin-right:7px;vertical-align:-2px}
+.rooms-create{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.rooms-create input{flex:1;min-width:180px;max-width:340px;padding:10px 14px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--text);outline:none;font-size:13px}
+.rooms-create input:focus{border-color:var(--acc)}
+.rooms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;padding:0 12px 12px}
+.room-card{position:relative;display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;border:1px solid var(--line);background:var(--card);cursor:pointer;overflow:hidden;transition:transform .16s,border-color .2s,box-shadow .2s}
+.room-card:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--acc) 55%,var(--line));box-shadow:0 18px 36px -30px var(--acc)}
+.room-card::after{content:'';position:absolute;right:-40px;top:-40px;width:130px;height:130px;border-radius:50%;background:radial-gradient(circle,color-mix(in srgb,var(--acc) 30%,transparent),transparent 70%);pointer-events:none}
+.room-card-top{display:flex;align-items:center;gap:10px}
+.room-card-ico{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--acc) 18%,var(--card2));border:1px solid color-mix(in srgb,var(--acc) 35%,var(--line));color:var(--acc);flex:none}
+.room-card-name{font-size:14.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-card-sub{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-now{display:flex;align-items:center;gap:8px;padding:8px;border-radius:11px;background:var(--card2);border:1px solid var(--line);min-width:0}
+.room-now .rc{width:30px;height:30px;border-radius:8px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:13px;overflow:hidden;flex:none}
+.room-now .rc img{width:100%;height:100%;object-fit:cover}
+.room-now b{display:block;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-now span{display:block;font-size:10px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-card-foot{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--muted2)}
+.room-live{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:color-mix(in srgb,var(--acc) 14%,var(--card2));border:1px solid color-mix(in srgb,var(--acc) 35%,var(--line));color:var(--text);font-size:10px;font-weight:700}
+.room-live i{width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 8px var(--good);animation:livePulse 1.8s infinite}
+@keyframes livePulse{0%,100%{opacity:1}50%{opacity:.35}}
+.room-empty{padding:24px;text-align:center;color:var(--muted);font-size:13px}
+/* комната */
+.room-shell{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,360px);gap:12px;padding:12px;align-items:start}
+.room-main{display:flex;flex-direction:column;gap:12px;min-width:0}
+.room-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.room-head .room-title{font-size:19px;font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-card-box{border:1px solid var(--line);border-radius:18px;background:var(--card);padding:14px;position:relative;overflow:hidden}
+.room-stage{display:flex;align-items:center;gap:14px;position:relative;z-index:1}
+.room-bigcover{width:96px;height:96px;border-radius:18px;overflow:hidden;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:38px;flex:none;box-shadow:0 0 0 1px color-mix(in srgb,var(--acc) 45%,var(--line)),0 16px 34px -22px var(--acc)}
+.room-bigcover img{width:100%;height:100%;object-fit:cover}
+.room-stage-mid{min-width:0;flex:1}
+.room-stage-label{font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:var(--muted2);font-weight:800}
+.room-stage-name{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-stage-artist{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.room-stage-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.room-listen{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:999px;border:none;background:var(--acc);color:var(--acc-fg,#fff);font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 8px 22px -12px var(--acc);transition:transform .15s,filter .2s}
+.room-listen:hover{transform:translateY(-1px);filter:brightness(1.07)}
+.room-listen.off{background:var(--card2);color:var(--text);border:1px solid var(--line);box-shadow:none}
+.room-clock{font-size:11px;color:var(--muted2);font-variant-numeric:tabular-nums}
+.room-panel{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.room-panel h4{margin:0 0 8px;font-size:10.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--muted)}
+.room-queue{display:flex;flex-direction:column;gap:6px;max-height:250px;overflow:auto}
+.room-q{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:10px;background:var(--card2);border:1px solid var(--line);min-width:0}
+.room-q .qc{width:28px;height:28px;border-radius:7px;overflow:hidden;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+.room-q .qc img{width:100%;height:100%;object-fit:cover}
+.room-q .qm{min-width:0;flex:1}
+.room-q b{display:block;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-q span{display:block;font-size:10px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-vote{display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted);font-size:10.5px;font-weight:800;cursor:pointer;flex:none}
+.room-vote.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 18%,var(--card));color:var(--text)}
+.room-vote:hover{border-color:var(--acc)}
+.room-track{padding:0}
+.room-chat{border:1px solid var(--line);border-radius:18px;background:var(--card);display:flex;flex-direction:column;min-height:420px;max-height:calc(100vh - 210px);overflow:hidden}
+.room-chat-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800}
+.room-chat-body{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px;min-height:0}
+.room-msg{display:flex;gap:8px;align-items:flex-start}
+.room-msg .ra{width:26px;height:26px;border-radius:50%;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:13px;flex:none;overflow:hidden}
+.room-msg .ra img{width:100%;height:100%;object-fit:cover}
+.room-msg-mid{min-width:0;flex:1}
+.room-msg-name{font-size:10.5px;color:var(--muted2);display:flex;gap:6px;align-items:center}
+.room-msg-name b{font-size:11px;color:var(--text)}
+.room-msg-text{font-size:12.5px;line-height:1.4;margin-top:2px;word-break:break-word}
+.room-msg.me .room-msg-text{color:color-mix(in srgb,var(--acc) 55%,var(--text))}
+.room-trackmsg{display:flex;align-items:center;gap:8px;margin-top:5px;padding:6px 8px;border-radius:10px;background:var(--card2);border:1px solid var(--line);min-width:0}
+.room-trackmsg .qc{width:30px;height:30px;border-radius:8px;overflow:hidden;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:13px;flex:none}
+.room-trackmsg .qc img{width:100%;height:100%;object-fit:cover}
+.room-trackmsg .tm{min-width:0;flex:1}
+.room-trackmsg b{display:block;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-trackmsg span{display:block;font-size:10px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-chat-inp{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line);align-items:center}
+.room-chat-inp input{flex:1;min-width:0;padding:9px 13px;border-radius:20px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-size:12.5px;outline:none}
+.room-chat-inp input:focus{border-color:var(--acc)}
+.room-ico-btn{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--card2);color:var(--text);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;transition:border-color .2s,color .2s}
+.room-ico-btn:hover{border-color:var(--acc);color:var(--acc)}
+.room-chat-inp .go{background:var(--acc);border-color:var(--acc);color:var(--acc-fg,#fff);font-weight:800}
+.room-pick{border:1px solid var(--line);border-radius:14px;background:var(--card2);padding:8px;margin:0 8px 8px}
+.room-pick input{width:100%;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:12px;outline:none;margin-bottom:6px}
+.room-pick-list{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.room-pick-item{display:flex;align-items:center;gap:8px;padding:6px;border-radius:9px;cursor:pointer;min-width:0}
+.room-pick-item:hover{background:var(--card)}
+.room-pick-item .qc{width:26px;height:26px;border-radius:7px;overflow:hidden;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+.room-pick-item .qc img{width:100%;height:100%;object-fit:cover}
+.room-pick-item b{display:block;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.room-pick-item span{display:block;font-size:10px;color:var(--muted2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rooms-teaser{display:flex;align-items:center;gap:12px;margin:12px;padding:14px 16px;border-radius:16px;border:1px solid color-mix(in srgb,var(--acc) 32%,var(--line));background:linear-gradient(115deg,color-mix(in srgb,var(--acc) 16%,var(--card2)),var(--card));cursor:pointer;transition:transform .16s,border-color .2s,box-shadow .2s}
+.rooms-teaser:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--acc) 60%,var(--line));box-shadow:0 18px 36px -30px var(--acc)}
+.rooms-teaser .rt-ico{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--acc) 20%,var(--card2));border:1px solid color-mix(in srgb,var(--acc) 40%,var(--line));color:var(--acc);flex:none}
+.rooms-teaser b{display:block;font-size:13.5px}
+.rooms-teaser span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+.rooms-teaser .rt-go{margin-left:auto;font-size:11.5px;font-weight:800;color:var(--acc);white-space:nowrap}
+
+/* ================= НЕФОР-ТЕМЫ (СКИНЫ) ================= */
+.skin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;padding:6px 0 10px}
+.skin-sw{position:relative;height:58px;border-radius:12px;border:1px solid var(--line);cursor:pointer;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding:6px;font-size:9.5px;font-weight:800;letter-spacing:.3px;color:var(--text);transition:transform .15s,border-color .2s,box-shadow .2s}
+.skin-sw:hover{transform:translateY(-2px);border-color:var(--acc)}
+.skin-sw.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc),0 0 18px -6px var(--acc)}
+.skin-sw span{position:relative;z-index:2;padding:2px 7px;border-radius:999px;background:rgba(0,0,0,.45);backdrop-filter:blur(3px);white-space:nowrap}
+.skin-sw i{position:absolute;inset:0;z-index:0}
+.skin-normal i{background:linear-gradient(135deg,#141418,#2a2a32 55%,#7a6cff)}
+.skin-noir i{background:linear-gradient(135deg,#101014,#2a2a30 55%,#d8d8e0)}
+.skin-vhs i{background:linear-gradient(135deg,#1a1030,#3a1d5c 45%,#ff2d8a 75%,#22d3ee)}
+.skin-acid i{background:linear-gradient(135deg,#07120a,#1d3b1a 50%,#a3f000)}
+.skin-blood i{background:linear-gradient(135deg,#150508,#3a0a12 55%,#ff3b3b)}
+.skin-ghost i{background:linear-gradient(135deg,#20242c,#6b7382 55%,#e8eef7)}
+.skin-dirt i{background:linear-gradient(135deg,#12130d,#3a3823 55%,#c8c98d)}
+.skin-void i{background:linear-gradient(135deg,#000,#0c0c10 60%,#5b4bff)}
+.skin-sakura i{background:linear-gradient(135deg,#1b0f17,#4a1c31 55%,#ffb3d1)}
+:root[data-skin]{color-scheme:dark}
+:root[data-skin=noir]{--bg:#0b0b0d;--card:#141417;--card2:#1d1d22;--line:#2e2e36;--input:#141417;--input-line:#2c2c34;--btn:#26262c;--btn-h:#34343c;--text:#ededf2;--muted:#a9a9b3;--muted2:#7d7d87;--shadow:rgba(0,0,0,.65)}
+:root[data-skin=vhs]{--bg:#0f0a18;--card:#181126;--card2:#241a36;--line:#3a2a54;--input:#181126;--input-line:#38284f;--btn:#2c2040;--btn-h:#3d2c56;--text:#f0e9ff;--muted:#b4a3cc;--muted2:#8a78a6}
+:root[data-skin=acid]{--bg:#070b08;--card:#0f1510;--card2:#182119;--line:#29382b;--input:#0f1510;--input-line:#273529;--btn:#20301f;--btn-h:#2e442c;--text:#e9f5e6;--muted:#a8bda4;--muted2:#7b9078}
+:root[data-skin=blood]{--bg:#0c0607;--card:#160b0d;--card2:#241014;--line:#3b1a20;--input:#160b0d;--input-line:#3a181f;--btn:#2d1116;--btn-h:#411820;--text:#f6e7e9;--muted:#c2a0a5;--muted2:#94757a}
+:root[data-skin=ghost]{--bg:#14171c;--card:#1e232a;--card2:#293039;--line:#3a4450;--input:#1e232a;--input-line:#3a4450;--btn:#303943;--btn-h:#3f4a56;--text:#edf2f8;--muted:#aebac6;--muted2:#8493a1}
+:root[data-skin=dirt]{--bg:#0f1109;--card:#191c11;--card2:#242818;--line:#3a3f26;--input:#191c11;--input-line:#373c24;--btn:#2c311b;--btn-h:#3c4227;--text:#f0f1df;--muted:#b8b99b;--muted2:#8e8f74}
+:root[data-skin=void]{--bg:#050507;--card:#0d0d11;--card2:#15151b;--line:#26262f;--input:#0d0d11;--input-line:#23232c;--btn:#1d1d25;--btn-h:#2a2a35;--text:#f2f2f7;--muted:#a3a3b0;--muted2:#767682}
+:root[data-skin=sakura]{--bg:#140d12;--card:#1e1219;--card2:#2a1a23;--line:#3f2833;--input:#1e1219;--input-line:#3e2732;--btn:#33202a;--btn-h:#442b37;--text:#fbeef4;--muted:#c9aabb;--muted2:#9b7f8d}
+:root[data-skin=vhs] body{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px);background-attachment:fixed}
+:root[data-skin=noir] body{background-image:radial-gradient(circle at 50% 0%,rgba(255,255,255,.05),transparent 55%);background-attachment:fixed}
+:root[data-skin=blood] body{background-image:radial-gradient(circle at 12% 0%,rgba(255,40,60,.10),transparent 48%);background-attachment:fixed}
+:root[data-skin=acid] body{background-image:radial-gradient(circle at 88% 0%,rgba(140,255,0,.08),transparent 46%);background-attachment:fixed}
+:root[data-skin=dirt] body{background-image:radial-gradient(circle at 30% 0%,rgba(190,185,120,.08),transparent 50%),repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 4px);background-attachment:fixed}
+:root[data-skin=ghost] body{background-image:radial-gradient(ellipse at 50% -10%,rgba(210,225,240,.14),transparent 60%);background-attachment:fixed}
+:root[data-skin=void] body{background-image:radial-gradient(circle at 50% 120%,rgba(91,75,255,.12),transparent 50%);background-attachment:fixed}
+:root[data-skin=sakura] body{background-image:radial-gradient(circle at 85% 8%,rgba(255,140,190,.10),transparent 42%);background-attachment:fixed}
+
+/* медиа в постах: аккуратные рамки и ограничение высоты */
+.post .att video{max-height:420px;border-radius:12px;background:#000}
+.post .att img{max-height:420px;object-fit:contain;background:var(--card2)}
+
+/* мобильная раскладка новых блоков */
+@media (max-width:860px){
+  .pf-gifts{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .room-shell{grid-template-columns:1fr}
+  .room-chat{max-height:none;min-height:360px}
+  .listen-card{max-width:none}
+}
+html[data-view=mobile] .pf-gifts{grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}
+html[data-view=mobile] .pf-gift::after{display:none}
+html[data-view=mobile] .room-shell{grid-template-columns:1fr;padding:8px;gap:8px}
+html[data-view=mobile] .rooms-grid{grid-template-columns:1fr}
+html[data-view=mobile] .room-bigcover{width:76px;height:76px;font-size:30px}
+html[data-view=mobile] .room-stage-name{font-size:17px}
+html[data-view=mobile] .room-chat{min-height:320px;max-height:none}
+html[data-view=mobile] .rooms-hero{margin:8px;padding:16px}
+html[data-view=mobile] .listen-card{max-width:none}
+html[data-view=mobile] .bdg-flip{min-width:66px;max-width:150px}
