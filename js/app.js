@@ -12,7 +12,17 @@ const LS={acc:'oomy.avault',logs:'oomy.lvault',posts:'oomy.posts',sess:'oomy.ses
           msgTomb:'oomy.msgTomb',chatTomb:'oomy.chatTomb'};
 const ADMIN='oomy'; /* аккаунт главного администратора */
 const XKEY='пушистый-ключ-neko-2026-厚い猫';
-const load=(k,d)=>{try{const r=localStorage.getItem(k);if(r===null)return d;const v=JSON.parse(r);return v===null?d:v}catch(e){return d}};
+const load=(k,d)=>{
+  try{
+    const r=localStorage.getItem(k);if(r===null)return d;
+    const v=JSON.parse(r);if(v===null)return d;
+    /* старые версии могли сохранить массив как объект {value,Count}:
+       такой «массив» ломает .filter/.map по всему сайту — отдаём значение по умолчанию */
+    if(Array.isArray(d)&&!Array.isArray(v))return d;
+    if(d&&typeof d==='object'&&!Array.isArray(d)&&(typeof v!=='object'||Array.isArray(v)))return d;
+    return v;
+  }catch(e){return d}
+};
 const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){saveWarn(v)}try{mirrorPut(k,v)}catch(e){}if(k!==LS.posts&&k!==LS.media)saveWarn(v);try{cloudPush(k)}catch(e){}};
 let saveWarned=false;
 function saveWarn(v){try{const s=JSON.stringify(v);if(s.length>3.5e6&&!saveWarned){saveWarned=true;toast('хранилище под завязку удали тяжёлые треки/файлы');}}catch(e){}}
@@ -2119,6 +2129,10 @@ function openGiftInfo(gid,owner,bi){
   const body=document.getElementById('giftBody');
   if(!body)return;
   const mine=owner&&owner===me.user&&it;
+  /* тираж кончился (или продажу закрыл админ) — кнопки «купить» быть не должно,
+     иначе получается «подарки закончились», а кнопка зовёт покупать */
+  const gLeft=gg?Math.max(0,(gg.tiraj||100)-soldOf(gg.id)):0;
+  const gSoldOut=!!gg&&(!!gg.closed||gLeft<=0);
   const dateStr=ts?new Date(ts).toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}):'';
   body.innerHTML=`
     <button class="minibtn" id="giBack">← назад</button>
@@ -2133,10 +2147,12 @@ function openGiftInfo(gid,owner,bi){
         ${gg&&gg.cmt?`<div class="stat-line"><span>описание</span><b>${esc(gg.cmt)}</b></div>`:''}
         ${owner?`<div class="stat-line"><span>владелец</span><b>${userLink(owner)}</b></div>`:''}
         ${it?`<div class="stat-line"><span>копия / получен</span><b>${it.cn?'#'+it.cn+' из '+(gg?gg.tiraj:'')+' · ':''}${from&&from!=='магазин'?userLink(from)+' · ':''}${dateStr||'давно'}</b></div>`:''}
-        ${gg?`<div class="stat-line"><span>цена / тираж</span><b>${gg.price} оонеток / ${gg.tiraj} шт</b></div>`:''}
+        ${gg?`<div class="stat-line"><span>цена / тираж</span><b>${gg.price} оонеток / ${gg.tiraj} шт${gSoldOut?' · <span style="color:var(--bad)">тираж закончился</span>':(gLeft<=(gg.tiraj||100)?' · осталось '+gLeft:'')}</b></div>`:''}
       </div>
     </div>
-    ${!owner&&gg&&me&&!me.guest?`<button class="dan-btn" id="giBuy" style="width:100%;margin-top:16px">купить за ${gg.price} оонеток</button>`:''}
+    ${!owner&&gg&&me&&!me.guest?(gSoldOut
+      ?`<button class="dan-btn" disabled style="width:100%;margin-top:16px;opacity:.5;cursor:not-allowed">закончились · тираж ${gg.tiraj} шт</button>`
+      :`<button class="dan-btn" id="giBuy" style="width:100%;margin-top:16px">купить за ${gg.price} оонеток</button>`):''}
     ${mine&&gg?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
       <button class="minibtn" id="giShelf">${it.shelf?'убрать с витрины':'на витрину'}</button>
       <button class="minibtn" id="giGive">передать</button>
@@ -2191,7 +2207,7 @@ function openGiftInfo(gid,owner,bi){
   const sh=body.querySelector('#giShelf');
   if(sh)sh.onclick=()=>{
     const list=bagOf(me.user);const x=list[bi];if(!x)return;
-    if(!x.shelf&&list.filter(g=>g.shelf).length>=6){toast('на витрине максимум 6 подарочков');return;}
+    if(!x.shelf&&list.filter(g=>g.shelf).length>=10){toast('на витрине максимум 10 подарочков');return;}
     x.shelf=!x.shelf;saveBag(me.user,list);openGiftInfo(gid,owner,bi);
     if(!document.getElementById('pg-home').classList.contains('hidden'))renderHome();
     if(!document.getElementById('pg-gifts').classList.contains('hidden'))renderGifts();
@@ -2405,10 +2421,10 @@ function renderUserPage(){
       ${isMe&&!me.guest?`<div class="stat"><b>${wallet()[u]||0}</b><span>оонеток</span></div>`:''}
     </div>`:''}
     ${sectOn(pd,'shelf')?`<div class="sect">
-      <h3>полка подарочков${shelf.length?' · '+Math.min(6,shelf.length)+'/6':''}</h3>
-      <div class="pf-gifts">${shelf.slice(0,6).map(x=>{
+      <h3>полка подарочков${shelf.length?' · '+Math.min(10,shelf.length)+'/10':''}</h3>
+      <div class="pf-gifts">${shelf.slice(0,10).map(x=>{
         const gg=x.g.gid?giftCatalog().find(z=>z.id===x.g.gid):null;
-        return `<span style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer" data-gift="${x.gi}" data-gowner="${esc(u)}" title="${esc(bagItemName(x.g))}${x.g.from?' · от '+esc(x.g.from):''}">${bagItemHTML(x.g,44)}<span style="font-size:10px;font-weight:700">${x.g.cn?'#'+x.g.cn+' · ':''}${esc(bagItemName(x.g))}</span>${gg?`<span class="rar-badge rar-${gg.r||'common'}" style="font-size:9px">${RARITY[gg.r||'common']}</span>`:''}</span>`}).join('')||'<span class="empty-shelf">полка пустая</span>'}</div>
+        return `<span class="pf-gift" data-gift="${x.gi}" data-gowner="${esc(u)}" title="${esc(bagItemName(x.g))}${x.g.from?' · от '+esc(x.g.from):''}">${bagItemHTML(x.g,64)}<span class="pf-gift-name">${x.g.cn?'#'+x.g.cn+' · ':''}${esc(bagItemName(x.g))}</span>${gg?`<span class="rar-badge rar-${gg.r||'common'}" style="font-size:9px">${RARITY[gg.r||'common']}</span>`:''}</span>`}).join('')||'<span class="empty-shelf">полка пустая</span>'}</div>
       <div class="link" style="padding-top:6px" id="upAllGifts">все подарки · ${bag.filter(g=>!g.hidden).length}</div>
     </div>`:''}
     ${sectOn(pd,'track')?`<div class="sect">
@@ -2625,10 +2641,10 @@ function tbShop(body,rail){
       <span data-ginfo="${g.id}" style="cursor:pointer">${giftImgHTML(g,72)}</span>
       <div class="gn" data-ginfo="${g.id}" style="cursor:pointer">${esc(g.name)}</div>
       <div class="rar-badge rar-${rar}">${RARITY[rar]}</div>
-      <div class="gp">${g.price} оонеток · ${soldOf(g.id)}/${g.tiraj}</div>
+      <div class="gp">${g.price} оонеток · ${dead?'тираж закончился':soldOf(g.id)+'/'+g.tiraj}</div>
       <div class="from-line" style="font-size:10.5px">лимит в час: ${used}/${cap}</div>
       ${dead
-        ?`<button class="minibtn" style="margin-top:5px;opacity:.6;cursor:default">закончились</button>`
+        ?`<button class="minibtn" disabled style="margin-top:5px;opacity:.5;cursor:not-allowed">закончились</button>`
         :`<button class="minibtn" data-buy="${g.id}" style="margin-top:5px">купить · ${g.price}</button>`}
       ${isAdmin()&&dead&&g.closed?`<button class="minibtn" data-open="${g.id}" style="margin-top:3px;font-size:10.5px">админ: открыть продажу</button>`:''}
     </div>`;
@@ -2681,7 +2697,7 @@ function tbShop(body,rail){
     if(!g)return;
     if(g.closed&&!isAdmin()){toast('погоди — покупку закрыл админ');return;}
     const left=Math.max(0,(g.tiraj||100)-soldOf(g.id));
-    if(left<=0&&!isAdmin()){toast('весь тираж раскуплён');return;}
+    if(left<=0){toast('весь тираж раскуплён — этот подарочек больше не купить');return;}
     buyGift(g,me.user,'');
   });
   body.querySelectorAll('[data-gg]').forEach(c=>c.onclick=e=>{
@@ -2695,9 +2711,9 @@ let pfDirectOpen=false;
 function oonCost(g){return '«'+g.name+'» за '+g.price+' оонеток'}
 function buyGift(g,to,from,msg){
   if(g.closed&&!isAdmin()){toast('погоди — покупку закрыл админ');return;}
-  if(myOon()<g.price){toast('оонеток не хватает');return;}
   const sold=soldOf(g.id);
-  if(sold>=(g.tiraj||100)&&!isAdmin()){toast('весь тираж раскуплён');return;}
+  if(sold>=(g.tiraj||100)){toast('весь тираж раскуплён — этот подарочек больше не купить');return;}
+  if(myOon()<g.price){toast('оонеток не хватает');return;}
   const cap=RAR_LIMIT[g.r||'common'];
   if(buyHistFor(me.user,g.id).length>=cap){toast('погоди — за час можно купить '+cap+' шт. этого подарка');return;}
   addOon(-g.price);
@@ -2803,7 +2819,7 @@ function tbMine(body,rail){
   body.querySelectorAll('[data-b]').forEach(b=>b.onclick=e=>{
     const bi=Number(b.dataset.b);const list=bagOf(me.user);const it=list[bi];
     if(b.dataset.act==='shelf'){
-      if(!it.shelf&&list.filter(g=>g.shelf).length>=6){toast('на полке максимум 6 подарочков');return;}
+      if(!it.shelf&&list.filter(g=>g.shelf).length>=10){toast('на полке максимум 10 подарочков');return;}
       it.shelf=!it.shelf;saveBag(me.user,list);renderGifts();
       if(!document.getElementById('pg-home').classList.contains('hidden'))renderHome();
       toast(it.shelf?'стоит на полке в профиле':'убрал с полки');
@@ -4363,10 +4379,10 @@ function renderHome(){
         ${me.guest?'':`<div class="stat"><b>${myOon()}</b><span>оонеток</span></div>`}
       </div>`:''}
       ${sectOn(pr,'shelf')?`<div class="sect" id="pfGiftsSect">
-        <h3>полка подарочков${myShelf.length?' · '+Math.min(6,myShelf.length)+'/6':''}</h3>
-        <div class="pf-gifts" id="pfGifts">${myShelf.slice(0,6).map(x=>{
+        <h3>полка подарочков${myShelf.length?' · '+Math.min(10,myShelf.length)+'/10':''}</h3>
+        <div class="pf-gifts" id="pfGifts">${myShelf.slice(0,10).map(x=>{
           const gg=x.g.gid?giftCatalog().find(z=>z.id===x.g.gid):null;
-          return `<span style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer" data-pfgift="${x.gi}" title="${esc(bagItemName(x.g))}${x.g.from?' · от '+esc(x.g.from):''}">${bagItemHTML(x.g,44)}<span style="font-size:10px;font-weight:700">${x.g.cn?'#'+x.g.cn+' · ':''}${esc(bagItemName(x.g))}</span>${gg?`<span class="rar-badge rar-${gg.r||'common'}" style="font-size:9px">${RARITY[gg.r||'common']}</span>`:''}</span>`}).join('')||'<span class="empty-shelf">полка пустая — загляни в подарочки 🎁</span>'}</div>
+          return `<span class="pf-gift" data-pfgift="${x.gi}" title="${esc(bagItemName(x.g))}${x.g.from?' · от '+esc(x.g.from):''}">${bagItemHTML(x.g,64)}<span class="pf-gift-name">${x.g.cn?'#'+x.g.cn+' · ':''}${esc(bagItemName(x.g))}</span>${gg?`<span class="rar-badge rar-${gg.r||'common'}" style="font-size:9px">${RARITY[gg.r||'common']}</span>`:''}</span>`}).join('')||'<span class="empty-shelf">полка пустая — загляни в подарочки 🎁</span>'}</div>
         <div class="link" style="padding-top:6px" id="pfAllGifts">все подарки · ${myGifts().filter(g=>!g.hidden).length}</div>
       </div>`:''}
       ${sectOn(pr,'status')?`<div class="sect">
